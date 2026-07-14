@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "provider": {
+    "callable": "TBD",
+    "kwargs": {
+      "dataset_name": "TBD",
+      "dataset_root": "TBD",
+      "split": "TBD",
+      "sample_id": "TBD",
+      "raw_format": "TBD",
+      "storage_layout": "TBD",
+      "field_roles": {
+        "x": "TBD",
+        "y": "TBD",
+        "timestamp": "TBD",
+        "polarity": "TBD"
+      },
+      "timestamp_unit": "TBD",
+      "timestamp_ordering": "TBD",
+      "coordinate_convention": "TBD",
+      "polarity_encoding": "TBD",
+      "sensor_height": "TBD",
+      "sensor_width": "TBD",
+      "window_policy": "TBD",
+      "temporal_start": "TBD",
+      "temporal_end": "TBD",
+      "interval_closure": "TBD",
+      "filtering": "TBD",
+      "event_frame": {
+        "definition": "TBD",
+        "rendered_frames": "TBD",
+        "frame_axis": "TBD",
+        "tensor_layout": "TBD",
+        "spatial_height": "TBD",
+        "spatial_width": "TBD",
+        "channel_count": "TBD",
+        "polarity_handling": "TBD",
+        "normalization": "TBD",
+        "clipping": "TBD",
+        "padding_or_truncation": "TBD",
+        "deterministic": "TBD"
+      },
+      "voxel_grid": {
+        "definition": "TBD",
+        "bins": "TBD",
+        "bin_axis": "TBD",
+        "tensor_layout": "TBD",
+        "spatial_height": "TBD",
+        "spatial_width": "TBD",
+        "channel_count": "TBD",
+        "polarity_handling": "TBD",
+        "normalization": "TBD",
+        "clipping": "TBD",
+        "padding_or_truncation": "TBD",
+        "deterministic": "TBD"
+      },
+      "time_surface": {
+        "definition": "TBD",
+        "reference": "TBD",
+        "decay": "TBD",
+        "tensor_layout": "TBD",
+        "spatial_height": "TBD",
+        "spatial_width": "TBD",
+        "channel_count": "TBD",
+        "polarity_handling": "TBD",
+        "normalization": "TBD",
+        "clipping": "TBD",
+        "padding_or_truncation": "TBD",
+        "deterministic": "TBD"
+      }
+    }
+  }
+}

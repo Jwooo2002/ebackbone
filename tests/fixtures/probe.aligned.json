@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "provider": {
+    "callable": "tests.probe_fixture_provider:load_aligned_sample",
+    "kwargs": {}
+  }
+}
+

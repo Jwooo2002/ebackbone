@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ebackbone-v3"
+version = "0.1.0"
+description = "Tri-representation event classification project foundation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+ebackbone-v3 = "ebackbone_v3.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+include = ["ebackbone_v3*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
