@@ -15,7 +15,12 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ebackbone_v3.contracts import ProbeSample, RawEventRecord, RepresentationRecord
+from ebackbone_v3.contracts import (
+    ClassificationRecord,
+    ProbeSample,
+    RawEventRecord,
+    RepresentationRecord,
+)
 from ebackbone_v3.errors import ProbeError
 
 
@@ -189,11 +194,20 @@ def _coerce_probe_sample(value: object) -> ProbeSample:
         representations[name] = (
             record if isinstance(record, RepresentationRecord) else _coerce_representation_record(record, name)
         )
+    classification_value = root.get("classification")
+    classification = (
+        None
+        if classification_value is None
+        else classification_value
+        if isinstance(classification_value, ClassificationRecord)
+        else _coerce_classification_record(classification_value)
+    )
     return ProbeSample(
         dataset_name=_required(root, "dataset_name", "provider result.dataset_name"),
         split=_required(root, "split", "provider result.split"),
         raw_events=raw,
         representations=representations,
+        classification=classification,
     )
 
 
@@ -216,6 +230,19 @@ def _coerce_representation_record(value: object, name: str) -> RepresentationRec
         raise ProbeError(f"invalid {key}: {exc}") from exc
 
 
+def _coerce_classification_record(value: object) -> ClassificationRecord:
+    key = "provider result.classification"
+    record = _require_mapping(value, key)
+    kwargs = {
+        field: _required(record, field, f"{key}.{field}")
+        for field in ClassificationRecord.__dataclass_fields__
+    }
+    try:
+        return ClassificationRecord(**kwargs)
+    except TypeError as exc:
+        raise ProbeError(f"invalid {key}: {exc}") from exc
+
+
 def _build_report(sample: ProbeSample) -> dict[str, Any]:
     dataset_name = _require_text(sample.dataset_name, "provider result.dataset_name")
     split = _require_text(sample.split, "provider result.split")
@@ -233,7 +260,7 @@ def _build_report(sample: ProbeSample) -> dict[str, Any]:
     for name in REPRESENTATION_NAMES:
         report = _summarize_representation(name, sample.representations[name], raw_facts)
         representation_reports[name] = report
-    return {
+    report = {
         "dataset": {"name": dataset_name, "split": split},
         "sample_id": raw_facts["sample_id"],
         "raw_events": raw_report,
@@ -261,6 +288,61 @@ def _build_report(sample: ProbeSample) -> dict[str, Any]:
                 ],
             },
         },
+    }
+    if sample.classification is not None:
+        report["classification"] = _summarize_classification(sample.classification)
+    return report
+
+
+def _summarize_classification(classification: ClassificationRecord) -> dict[str, Any]:
+    key = "classification"
+    class_id = _require_text(classification.class_id, f"{key}.class_id")
+    class_index = _nonnegative_int(classification.class_index, f"{key}.class_index")
+    class_count = _positive_int(classification.class_count, f"{key}.class_count")
+    if class_index >= class_count:
+        raise ProbeError(
+            f"{key}.class_index={class_index} must be smaller than class_count={class_count}"
+        )
+    supplied_mapping = _require_mapping(classification.class_to_index, f"{key}.class_to_index")
+    class_to_index: dict[str, int] = {}
+    for supplied_class_id, supplied_index in supplied_mapping.items():
+        mapped_class_id = _require_text(supplied_class_id, f"{key}.class_to_index key")
+        if mapped_class_id in class_to_index:
+            raise ProbeError(f"{key}.class_to_index contains duplicate class id {mapped_class_id!r}")
+        class_to_index[mapped_class_id] = _nonnegative_int(
+            supplied_index,
+            f"{key}.class_to_index.{mapped_class_id}",
+        )
+    if len(class_to_index) != class_count:
+        raise ProbeError(
+            f"{key}.class_to_index has {len(class_to_index)} entries but class_count={class_count}"
+        )
+    if set(class_to_index.values()) != set(range(class_count)):
+        raise ProbeError(f"{key}.class_to_index values must be exactly 0..{class_count - 1}")
+    if class_to_index.get(class_id) != class_index:
+        raise ProbeError(
+            f"{key}.class_id/index pair does not match class_to_index: "
+            f"{class_id!r} -> {class_to_index.get(class_id)!r}, declared {class_index}"
+        )
+    mapping_policy = _require_text(classification.mapping_policy, f"{key}.mapping_policy")
+    label_source = _require_text(classification.label_source, f"{key}.label_source")
+    unresolved = _find_tbd(
+        {
+            "class_id": class_id,
+            "mapping_policy": mapping_policy,
+            "label_source": label_source,
+        },
+        prefix=key,
+    )
+    if unresolved:
+        raise ProbeError(f"classification metadata contains unresolved values: {', '.join(unresolved)}")
+    return {
+        "class_id": class_id,
+        "class_index": class_index,
+        "class_count": class_count,
+        "class_to_index": dict(sorted(class_to_index.items())),
+        "mapping_policy": mapping_policy,
+        "label_source": label_source,
     }
 
 
@@ -797,6 +879,17 @@ def _positive_int(value: object, key: str) -> int:
             pass
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ProbeError(f"{key} must be a positive integer")
+    return value
+
+
+def _nonnegative_int(value: object, key: str) -> int:
+    if hasattr(value, "item") and not isinstance(value, (int, bool)):
+        try:
+            value = value.item()
+        except (TypeError, ValueError, RuntimeError):
+            pass
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ProbeError(f"{key} must be a nonnegative integer")
     return value
 
 

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "provider": {
+    "callable": "ebackbone_v3.providers.n_imagenet_mini:load_sample",
+    "kwargs": {
+      "dataset_root": "/mnt/hdd1/datasets/event/n_imagenet",
+      "split": "validation",
+      "sample_id": "validation/n01855672/ILSVRC2012_val_00049352.npz",
+      "voxel_bins": 4
+    }
+  }
+}

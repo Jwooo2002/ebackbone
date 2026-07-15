@@ -10,7 +10,9 @@ Each sample has:
 - one class label
 - a stable sample identifier
 
-The precise dataset and slicing policy are currently `TBD` and must be confirmed from the actual data pipeline.
+For the first real-data probe, the selected dataset and whole-stored-sample
+policy are recorded in D009-D011 of `DECISIONS.md`. Whether a later production
+B0/B1 pipeline adopts the probe renderer unchanged remains `TBD`.
 
 ## Raw event contract
 
@@ -21,7 +23,11 @@ Expected raw event fields:
 - timestamp `t`
 - polarity `p`
 
-Exact storage layout, dtype, timestamp unit, ordering, and polarity encoding are `TBD` until inspected.
+For the selected N-ImageNet mini probe, the verified fields are a one-dimensional
+packed structured NumPy array with `x:uint16`, `y:uint16`, `t:uint16`, and
+`p:bool`. Raw timestamps are microseconds and nondecreasing with ties; coordinates
+are zero-based at 480 x 640 resolution. See D010 for evidence boundaries and
+remaining acquisition/export `TBD` items.
 
 ## Representation generation
 

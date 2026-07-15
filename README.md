@@ -39,6 +39,8 @@ From the repository root:
 ```bash
 python main.py --help
 python main.py probe --config configs/probe.example.json
+python main.py probe --config configs/probe.n_imagenet_mini.train.part1.json
+python main.py probe --config configs/probe.n_imagenet_mini.validation.first.json
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
 ```
@@ -51,11 +53,12 @@ The output keeps fusion, pooling, encoder sharing, normalization, voxel bins, an
 time-surface semantics marked `TBD`.
 
 The probe uses an explicitly configured Python provider. It validates raw fields,
-event counts, timestamp range, representation tensor summaries, provenance, and
-cross-representation temporal alignment. The checked-in example intentionally
-fails with exact unresolved configuration keys because no target dataset,
-temporal slicing policy, or renderer has been selected yet. See
-`docs/PROBE_PROVIDER_CONTRACT.md`.
+event counts, timestamp range, classification bookkeeping, representation tensor
+summaries, provenance, and cross-representation temporal alignment. The generic
+`probe.example.json` remains an intentional unresolved-contract example. The
+resolved N-ImageNet mini configs exercise the verified archive-native provider at
+the local dataset root `/mnt/hdd1/datasets/event/n_imagenet`. See
+`docs/PROBE_PROVIDER_CONTRACT.md` and D009-D011 in `docs/DECISIONS.md`.
 
 ## Development setup
 

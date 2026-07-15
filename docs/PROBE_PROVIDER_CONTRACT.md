@@ -55,6 +55,22 @@ with the equivalent fields.
 - `split`: explicit split identity
 - `raw_events`: raw-event record described below
 - `representations`: exactly `event_frame`, `voxel_grid`, and `time_surface`
+- optional `classification`: deterministic supervised-bookkeeping record described below
+
+### Classification record
+
+When a dataset has a verified class mapping, the provider may return:
+
+- `class_id`: dataset-native class identifier;
+- `class_index`: zero-based numeric class index;
+- `class_count`: total number of mapped classes;
+- `class_to_index`: complete bijection from class identifiers to `0..class_count-1`;
+- `mapping_policy`: deterministic rule used to construct the mapping;
+- `label_source`: where the class identifier is stored.
+
+The generic probe verifies the bijection and the current sample's ID/index pair.
+Classification metadata is bookkeeping only. It must not enter event selection,
+temporal-window selection, filtering, or representation generation.
 
 ### Raw-event record
 
@@ -136,9 +152,14 @@ that event subset. Matching tensor shapes alone are not alignment evidence.
 Labels must not be used to select the interval, filter events, construct a
 representation, or create the event-subset identity.
 
-## Current limitation
+## Checked-in real provider
 
-No real provider is checked in yet. Candidate code in sibling projects fixes
-dataset-specific choices such as event layout, temporal window, voxel bins,
-time-surface definition, normalization, and sometimes Event2Vec behavior. It is
-therefore reference material, not a V3 runtime dependency.
+`ebackbone_v3.providers.n_imagenet_mini:load_sample` is the first real provider.
+It reads the archive-native 100-class N-ImageNet mini release, preserves the raw
+structured-array dtypes, and renders the three probe tensors once from the whole
+stored event array. Its checked-in configs use the verified local dataset root
+`/mnt/hdd1/datasets/event/n_imagenet`.
+
+The renderer choices and their probe-only scope are recorded in D011 of
+`docs/DECISIONS.md`. They do not select a production B0/B1 model, fusion design,
+pooling method, encoder-sharing policy, or training recipe.

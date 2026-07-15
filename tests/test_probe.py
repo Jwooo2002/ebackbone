@@ -36,6 +36,14 @@ def test_aligned_provider_reports_full_contract(tmp_path: Path) -> None:
     assert report["config"]["sha256"] == hashlib.sha256(config.read_bytes()).hexdigest()
     assert report["dataset"] == {"name": "contract-test-fixture", "split": "train"}
     assert report["sample_id"] == "train/test-sample-0001"
+    assert report["classification"] == {
+        "class_id": "fixture-class-b",
+        "class_index": 1,
+        "class_count": 2,
+        "class_to_index": {"fixture-class-a": 0, "fixture-class-b": 1},
+        "mapping_policy": "test-fixture lexicographic mapping",
+        "label_source": "test-fixture bookkeeping only",
+    }
     raw = report["raw_events"]
     assert set(raw["fields"]) == {"coord_x", "coord_y", "timestamp_us", "polarity_bit"}
     assert raw["fields"]["timestamp_us"]["dtype"] == "int64"
@@ -90,6 +98,7 @@ def test_aligned_provider_reports_full_contract(tmp_path: Path) -> None:
         ("load_out_of_bounds_coordinates_sample", "raw coordinates violate zero_based_xy bounds"),
         ("load_duplicate_strict_timestamps_sample", "timestamp ordering does not match declaration"),
         ("load_wrong_polarity_encoding_sample", "do not match declared encoding"),
+        ("load_bad_class_mapping_sample", "class_id/index pair does not match class_to_index"),
     ],
 )
 def test_invalid_provider_result_fails_actionably(

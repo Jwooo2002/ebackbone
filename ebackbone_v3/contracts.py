@@ -55,6 +55,18 @@ class RepresentationRecord:
 
 
 @dataclass(frozen=True)
+class ClassificationRecord:
+    """Dataset bookkeeping for the probed sample's supervised class."""
+
+    class_id: str
+    class_index: int
+    class_count: int
+    class_to_index: Mapping[str, int]
+    mapping_policy: str
+    label_source: str
+
+
+@dataclass(frozen=True)
 class ProbeSample:
     """Complete real-sample result returned by a configured provider."""
 
@@ -62,6 +74,12 @@ class ProbeSample:
     split: str
     raw_events: RawEventRecord
     representations: Mapping[str, RepresentationRecord]
+    classification: ClassificationRecord | None = None
 
 
-__all__ = ["ProbeSample", "RawEventRecord", "RepresentationRecord"]
+__all__ = [
+    "ClassificationRecord",
+    "ProbeSample",
+    "RawEventRecord",
+    "RepresentationRecord",
+]

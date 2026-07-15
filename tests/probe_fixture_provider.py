@@ -7,7 +7,12 @@ from pathlib import Path
 
 import torch
 
-from ebackbone_v3.contracts import ProbeSample, RawEventRecord, RepresentationRecord
+from ebackbone_v3.contracts import (
+    ClassificationRecord,
+    ProbeSample,
+    RawEventRecord,
+    RepresentationRecord,
+)
 from ebackbone_v3.probe import compute_event_subset_id
 
 
@@ -94,6 +99,14 @@ def load_aligned_sample() -> ProbeSample:
         split="train",
         raw_events=raw,
         representations=representations,
+        classification=ClassificationRecord(
+            class_id="fixture-class-b",
+            class_index=1,
+            class_count=2,
+            class_to_index={"fixture-class-a": 0, "fixture-class-b": 1},
+            mapping_policy="test-fixture lexicographic mapping",
+            label_source="test-fixture bookkeeping only",
+        ),
     )
 
 
@@ -265,6 +278,15 @@ def load_nonfinite_representation_sample() -> ProbeSample:
     tensor[0, 0, 0] = float("nan")
     representations["event_frame"] = replace(representations["event_frame"], tensor=tensor)
     return replace(sample, representations=representations)
+
+
+def load_bad_class_mapping_sample() -> ProbeSample:
+    sample = load_aligned_sample()
+    assert sample.classification is not None
+    return replace(
+        sample,
+        classification=replace(sample.classification, class_index=0),
+    )
 
 
 def load_missing_file(sample_path: str) -> ProbeSample:
