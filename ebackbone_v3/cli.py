@@ -109,6 +109,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Synthetic baseline contract to exercise.",
     )
     smoke_parser.set_defaults(handler=_handle_smoke)
+
+    train_b0_parser = subparsers.add_parser(
+        "train-b0",
+        help="Run the bounded real-data B0 tiny-overfit validation only.",
+    )
+    train_b0_parser.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to the immutable project train.jsonl manifest.",
+    )
+    train_b0_parser.add_argument(
+        "--dataset-root",
+        default="/mnt/hdd1/datasets/event/n_imagenet",
+        help="N-ImageNet root containing mini_zenodo/archives.",
+    )
+    train_b0_parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="New or empty directory for the bounded-run checkpoint and report.",
+    )
+    train_b0_parser.add_argument(
+        "--subset-size",
+        type=int,
+        default=16,
+        help="Deterministic tiny subset size; must be from 16 through 32 (default: 16).",
+    )
+    train_b0_parser.add_argument("--epochs", type=int, default=240)
+    train_b0_parser.add_argument("--batch-size", type=int, default=16)
+    train_b0_parser.add_argument("--learning-rate", type=float, default=0.01)
+    train_b0_parser.add_argument("--seed", type=int, default=20260715)
+    train_b0_parser.add_argument(
+        "--target-train-accuracy",
+        type=float,
+        default=0.95,
+        help="Minimum final tiny-subset accuracy required for PASS (default: 0.95).",
+    )
+    train_b0_parser.set_defaults(handler=_handle_train_b0)
     return parser
 
 
@@ -163,6 +200,22 @@ def _handle_inspect_sample(args: argparse.Namespace) -> dict[str, Any]:
         dataset_root=args.dataset_root,
         cache_root=args.cache_root,
         split=args.split,
+    )
+
+
+def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.b0_training import run_tiny_overfit
+
+    return run_tiny_overfit(
+        manifest_path=args.manifest,
+        dataset_root=args.dataset_root,
+        output_dir=args.output_dir,
+        subset_size=args.subset_size,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        seed=args.seed,
+        target_train_accuracy=args.target_train_accuracy,
     )
 
 

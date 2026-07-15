@@ -50,6 +50,11 @@ python main.py inspect-sample \
   --cache off
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
+python main.py train-b0 \
+  --manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
+  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
+  --output-dir /tmp/ebackbone-v3-b0-tiny-overfit \
+  --subset-size 16 --epochs 240 --batch-size 16 --learning-rate 0.01 --seed 20260715
 ```
 
 The two smoke commands are deterministic CPU-only execution checks. They use
@@ -106,6 +111,14 @@ contract versions, project/source split identity, the exact raw payload hash,
 and the raw-event identity, so a stale entry is never silently reused. Project-final-test rows are not loaded by
 default: inspecting `test.jsonl` requires an explicit `--split test` argument.
 
+`train-b0` is intentionally limited to the first real-data B0 validation: a
+deterministic 16--32 sample overfit run from `train.jsonl`. It materializes only
+the selected production `[2,480,640]` float32 event frames in memory, performs
+random-initialized CNN plus linear-head cross-entropy training, and writes a
+checkpoint with strict reload/logit-equivalence verification. It does not
+provide a full-dataset mode, access validation/test rows, augment inputs, or
+read/write the representation cache.
+
 ## Development setup
 
 Python 3.10 or newer, NumPy 1.24 or newer, and PyTorch 2.0 or newer are required.
@@ -124,7 +137,7 @@ python -m pytest -q
 - semantic alignment
 - auxiliary reconstruction
 - detection or segmentation
-- models, fusion, or training loops
+- B1 models, fusion, or training loops
 
 ## Document order
 

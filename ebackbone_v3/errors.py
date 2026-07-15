@@ -19,3 +19,7 @@ class SplitError(EBackboneV3Error):
 
 class DatasetError(EBackboneV3Error):
     """Raised when a manifest-backed raw-event sample cannot be resolved safely."""
+
+
+class TrainingError(EBackboneV3Error):
+    """Raised when the bounded B0 training contract cannot be satisfied."""
