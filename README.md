@@ -41,6 +41,8 @@ python main.py --help
 python main.py probe --config configs/probe.example.json
 python main.py probe --config configs/probe.n_imagenet_mini.train.part1.json
 python main.py probe --config configs/probe.n_imagenet_mini.validation.first.json
+python main.py build-splits --config configs/splits.n_imagenet_mini.json
+python main.py verify-splits --manifest-dir manifests/n_imagenet_mini/supervised-v1
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
 ```
@@ -65,6 +67,20 @@ The production representation contract is implemented separately in
 and aligned B1 frame/voxel/time-surface tensors without implementing a model or
 training loop.
 
+The supervised evaluation split protocol is recorded in D013. It derives a
+deterministic 50-sample-per-class internal validation subset from the official
+training source, keeps the remaining official-training samples as project
+`train`, and reserves every official-validation sample as project `test`.
+Source and project roles remain separate in the immutable manifests: project
+test rows retain `source_split: "validation"` and use `split: "test"`.
+
+`build-splits` indexes archive members directly without decoding event tensors.
+It writes canonical `train.jsonl`, `validation.jsonl`, `test.jsonl`,
+`provenance.json`, and `SHA256SUMS` files. Existing artifacts are verified and
+left byte-for-byte untouched; changed inputs, seed, quota, or bytes are a hard
+conflict. The stale bundled 1,000-class path lists are checksummed as
+non-authoritative provenance inputs and never define membership.
+
 ## Development setup
 
 Python 3.10 or newer, NumPy 1.24 or newer, and PyTorch 2.0 or newer are required.
@@ -83,6 +99,7 @@ python -m pytest -q
 - semantic alignment
 - auxiliary reconstruction
 - detection or segmentation
+- models, fusion, or training loops
 
 ## Document order
 

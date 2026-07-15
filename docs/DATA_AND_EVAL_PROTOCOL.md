@@ -15,6 +15,65 @@ D011 defines the probe-only renderer; D012 separately defines the production
 B0/B1 representations. The probe renderer must not be substituted for the
 production renderer or reinterpreted as production evidence.
 
+## Supervised project split protocol
+
+N-ImageNet mini provides dataset-native source splits named `train` and
+`validation`, but no independent official test split. D013 adopts this fixed
+project-level interpretation:
+
+- project `train`: 124,395 samples remaining after the internal holdout;
+- project `validation`: 5,000 official-training samples, exactly 50 per class;
+- project `test`: all 5,000 official-validation samples, exactly 50 per class.
+
+The official training source is partitioned once by a deterministic per-class
+SHA-256 rank with seed `20260715`. Runtime data loading must consume the checked
+manifest assignment and must never create another random split. The official
+validation source is not renamed at the storage/provider layer: each final-test
+row preserves `source_split: "validation"` and records the project role
+separately as `split: "test"`.
+
+All 100 classes occur in every project split. Sample IDs and source locators are
+globally unique, and the three project sample-ID sets are pairwise disjoint.
+The stable sample ID is based on source identity (`source_split/class/file`), so
+changing the derived project assignment does not change sample identity.
+
+The final-test labels may appear in the immutable manifest only for supervised
+bookkeeping, protocol verification, and final scoring after the method and
+checkpoint-selection procedure are frozen. They must not influence training,
+checkpoint selection, early stopping, hyperparameters, normalization,
+augmentation, representation choices, fusion, or architecture decisions. Any
+decision informed by project-test results invalidates those results as untouched
+final-test evidence.
+
+### Manifest and provenance contract
+
+The canonical artifact directory contains only:
+
+- `train.jsonl`
+- `validation.jsonl`
+- `test.jsonl`
+- `provenance.json`
+- `SHA256SUMS`
+
+Every row records schema version, source-stable sample ID, WordNet class ID,
+numeric class label/index, project split, dataset-native source split, relative
+source archive and nested member paths, exact member byte size, and SHA-256 of
+the uncompressed stored NPZ bytes. No representation cache or tensor is read or
+created.
+
+Provenance records the selection algorithm and seed, holdout quota, class
+mapping, source/project counts, all 11 archive checksums, and checksums for the
+two stale bundled path lists marked non-authoritative. It also records exact
+manifest hashes, a source-catalog hash, a canonical parameter hash, and a
+generation fingerprint. Timestamps, absolute dataset roots, filesystem mtimes,
+and archive iteration order are excluded from canonical output.
+
+Generation is atomic and immutable. Repeating the same generation against a
+different empty destination is byte-identical. Repeating it against the same
+destination verifies and leaves every file untouched. Different parameters,
+inputs, incomplete artifacts, or altered bytes are refused rather than
+overwritten.
+
 ## Raw event contract
 
 Expected raw event fields:
@@ -109,6 +168,9 @@ Do not use:
 - future events outside the defined sample interval
 
 Any dataset-level normalization statistics must be computed from the training split only.
+
+Here `training split` means project `train` from the immutable D013 manifest;
+internal validation and final test are excluded.
 
 ## Metrics
 

@@ -25,14 +25,21 @@ def test_root_help_lists_commands() -> None:
     result = _run_cli("--help")
     assert result.returncode == 0
     assert result.stderr == ""
-    assert "{probe,smoke}" in result.stdout
+    assert "{probe,build-splits,verify-splits,smoke}" in result.stdout
     assert "Inspect one real raw-event sample" in result.stdout
+    assert "Build immutable supervised" in result.stdout
+    assert "Verify immutable split manifests" in result.stdout
     assert "synthetic CPU-only" in result.stdout
 
 
 @pytest.mark.parametrize(
     ("command", "expected"),
-    [("probe", "--config"), ("smoke", "--baseline {b0,b1}")],
+    [
+        ("probe", "--config"),
+        ("build-splits", "--config"),
+        ("verify-splits", "--manifest-dir"),
+        ("smoke", "--baseline {b0,b1}"),
+    ],
 )
 def test_subcommand_help(command: str, expected: str) -> None:
     result = _run_cli(command, "--help")
@@ -84,3 +91,41 @@ def test_importing_main_has_no_cli_side_effect() -> None:
     assert result.returncode == 0
     assert result.stdout.strip() == "import-ok"
     assert result.stderr == ""
+
+
+def test_split_cli_errors_are_actionable_without_tracebacks(tmp_path: Path) -> None:
+    missing_config = _run_cli(
+        "build-splits", "--config", str(tmp_path / "missing-config.json")
+    )
+    assert missing_config.returncode == 2
+    assert missing_config.stdout == ""
+    assert "split configuration does not exist" in missing_config.stderr
+    assert "Traceback" not in missing_config.stderr
+
+    missing_manifests = _run_cli(
+        "verify-splits", "--manifest-dir", str(tmp_path / "missing-manifests")
+    )
+    assert missing_manifests.returncode == 2
+    assert missing_manifests.stdout == ""
+    assert "manifest directory does not exist" in missing_manifests.stderr
+    assert "Traceback" not in missing_manifests.stderr
+
+    config = tmp_path / "missing-dataset.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset_root": str(tmp_path / "missing-dataset"),
+                "manifest_dir": str(tmp_path / "manifests"),
+                "seed": 20260715,
+                "internal_validation_per_class": 50,
+            }
+        ),
+        encoding="utf-8",
+    )
+    missing_dataset = _run_cli("build-splits", "--config", str(config))
+    assert missing_dataset.returncode == 2
+    assert missing_dataset.stdout == ""
+    assert "could not index the configured dataset release" in missing_dataset.stderr
+    assert str(tmp_path / "missing-dataset") in missing_dataset.stderr
+    assert "Traceback" not in missing_dataset.stderr

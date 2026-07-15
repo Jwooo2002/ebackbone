@@ -12,3 +12,6 @@ class ProbeError(EBackboneV3Error):
 class SmokeError(EBackboneV3Error):
     """Raised when a synthetic execution smoke invariant fails."""
 
+
+class SplitError(EBackboneV3Error):
+    """Raised when supervised split manifests cannot be built or verified."""

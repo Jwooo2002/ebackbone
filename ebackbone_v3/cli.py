@@ -28,6 +28,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     probe_parser.set_defaults(handler=_handle_probe)
 
+    build_splits_parser = subparsers.add_parser(
+        "build-splits",
+        help="Build immutable supervised N-ImageNet mini split manifests.",
+    )
+    build_splits_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to a resolved JSON split-build configuration.",
+    )
+    build_splits_parser.set_defaults(handler=_handle_build_splits)
+
+    verify_splits_parser = subparsers.add_parser(
+        "verify-splits",
+        help="Verify immutable split manifests, provenance, and leakage invariants.",
+    )
+    verify_splits_parser.add_argument(
+        "--manifest-dir",
+        required=True,
+        help="Directory containing train/validation/test JSONL and provenance files.",
+    )
+    verify_splits_parser.set_defaults(handler=_handle_verify_splits)
+
     smoke_parser = subparsers.add_parser(
         "smoke",
         help="Run a synthetic CPU-only forward, cross-entropy, and backward check.",
@@ -68,6 +90,18 @@ def _handle_smoke(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.smoke import run_synthetic_smoke
 
     return run_synthetic_smoke(args.baseline)
+
+
+def _handle_build_splits(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.splits import build_splits
+
+    return build_splits(args.config)
+
+
+def _handle_verify_splits(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.splits import verify_splits
+
+    return verify_splits(args.manifest_dir)
 
 
 __all__ = ["build_parser", "entrypoint", "main"]

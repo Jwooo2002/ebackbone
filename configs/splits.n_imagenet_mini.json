@@ -1,0 +1,7 @@
+{
+  "dataset_root": "/mnt/hdd1/datasets/event/n_imagenet",
+  "internal_validation_per_class": 50,
+  "manifest_dir": "../manifests/n_imagenet_mini/supervised-v1",
+  "schema_version": 1,
+  "seed": 20260715
+}
