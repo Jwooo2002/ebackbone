@@ -6,7 +6,7 @@ import torch
 from torch.nn import functional as F
 
 from ebackbone_v3.b0_training import (
-    B0FrameClassifier,
+    CompactDebugB0FrameClassifier,
     save_checkpoint,
     select_tiny_subset,
     train_one_optimizer_step,
@@ -24,14 +24,14 @@ def _frames(batch_size: int = 2) -> torch.Tensor:
 
 
 def test_b0_model_output_shape() -> None:
-    model = B0FrameClassifier(class_count=100)
+    model = CompactDebugB0FrameClassifier(class_count=100)
     logits = model(_frames())
     assert logits.shape == (2, 100)
 
 
 def test_b0_one_optimizer_step_has_finite_loss_gradients_and_parameter_update() -> None:
     torch.manual_seed(3)
-    model = B0FrameClassifier(class_count=4)
+    model = CompactDebugB0FrameClassifier(class_count=4)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     labels = torch.tensor([1, 3], dtype=torch.long)
     result = train_one_optimizer_step(model, optimizer, _frames(), labels)
@@ -44,7 +44,7 @@ def test_b0_one_optimizer_step_has_finite_loss_gradients_and_parameter_update() 
 
 def test_b0_checkpoint_round_trip_is_strict_and_logit_exact(tmp_path: Path) -> None:
     torch.manual_seed(4)
-    model = B0FrameClassifier(class_count=4)
+    model = CompactDebugB0FrameClassifier(class_count=4)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     inputs = _frames()
     labels = torch.tensor([0, 2], dtype=torch.long)
@@ -88,7 +88,7 @@ def test_fixed_native_resolution_tiny_subset_substantially_reduces_loss() -> Non
     frames[2, 0].fill_(0.75)
     frames[3, 1].fill_(0.75)
     labels = torch.tensor([0, 1, 0, 1], dtype=torch.long)
-    model = B0FrameClassifier(class_count=2)
+    model = CompactDebugB0FrameClassifier(class_count=2)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     with torch.no_grad():

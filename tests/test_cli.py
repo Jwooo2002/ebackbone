@@ -27,6 +27,7 @@ def test_root_help_lists_commands() -> None:
     assert result.stderr == ""
     assert "train-b0" in result.stdout
     assert "train-b0-debug" in result.stdout
+    assert "diagnose-b0-train" in result.stdout
     assert "Inspect one real raw-event sample" in result.stdout
     assert "Build immutable supervised" in result.stdout
     assert "Verify immutable split manifests" in result.stdout
@@ -44,6 +45,7 @@ def test_root_help_lists_commands() -> None:
         ("smoke", "--baseline {b0,b1}"),
         ("train-b0", "--manifest-dir"),
         ("train-b0-debug", "--manifest-dir"),
+        ("diagnose-b0-train", "--manifest-dir"),
     ],
 )
 def test_subcommand_help(command: str, expected: str) -> None:

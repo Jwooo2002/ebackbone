@@ -23,7 +23,6 @@ from ebackbone_v3.b0_models import (
     B0_BOUNDED_CPU_BATCH_SIZE,
     B0_CLASS_COUNT,
     B0_INPUT_SHAPE,
-    B0FrameClassifier,
     PRODUCTION_MODEL_NAME,
     build_b0_model,
     trainable_parameter_count,
@@ -42,8 +41,8 @@ from ebackbone_v3.representations import (
 )
 
 
-PRODUCTION_CHECKPOINT_SCHEMA_VERSION = 2
-PRODUCTION_REPORT_SCHEMA_VERSION = 2
+PRODUCTION_CHECKPOINT_SCHEMA_VERSION = 3
+PRODUCTION_REPORT_SCHEMA_VERSION = 3
 CHECKPOINT_LAST_FILENAME = "checkpoint_last.pt"
 CHECKPOINT_BEST_FILENAME = "checkpoint_best.pt"
 LOG_FILENAME = "metrics.jsonl"
@@ -238,7 +237,7 @@ def run_production_b0(
         device=device,
     )
 
-    model = B0FrameClassifier(class_count=B0_CLASS_COUNT).to(device)
+    model = build_b0_model(class_count=B0_CLASS_COUNT).to(device)
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=learning_rate,
@@ -378,14 +377,15 @@ def run_production_b0(
         "model": {
             "name": PRODUCTION_MODEL_NAME,
             "architecture": (
-                "Conv2d(2,16,7,s4)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
-                "Conv2d(32,64,3,s2)-ReLU-Conv2d(64,64,3,s2)-ReLU-"
-                "AdaptiveAvgPool2d(1)-Linear(64,100)"
+                "ResNet-18 basic blocks [2,2,2,2]; Conv2d(2,64,7,s2,p3,bias=False) "
+                "stem; BatchNorm2d; MaxPool2d(3,s2,p1); AdaptiveAvgPool2d(1); "
+                "Linear(512,100)"
             ),
-            "initialization": "PyTorch random initialization; no pretrained path",
-            "model_side_normalization": "none",
+            "initialization": "random Kaiming-normal convolution initialization",
+            "model_side_normalization": "standard ResNet-18 BatchNorm2d layers",
             "global_pooling": "adaptive average pooling to 1x1",
-            "classifier": "one Linear(64,100)",
+            "embedding_dimension": 512,
+            "classifier": "exactly one Linear(512,100)",
             "trainable_parameter_count": trainable_parameter_count(model),
         },
         "history": history,
@@ -655,7 +655,8 @@ def _checkpoint_payload(
             "class_count": B0_CLASS_COUNT,
             "initialization": "random",
             "global_pooling": "AdaptiveAvgPool2d((1,1))",
-            "classifier": "Linear(64,100)",
+            "embedding_dimension": 512,
+            "classifier": "Linear(512,100)",
         },
         "model_state_dict": model.state_dict(),
         "optimizer": run_config["optimizer"],
@@ -703,8 +704,8 @@ def _run_config(
             "name": PRODUCTION_MODEL_NAME,
             "class_count": B0_CLASS_COUNT,
             "initialization": "random",
-            "pretrained_weights": None,
-            "model_side_normalization": "none",
+            "model_side_normalization": "standard ResNet-18 BatchNorm2d layers",
+            "embedding_dimension": 512,
         },
         "objective": "cross_entropy",
         "optimizer": {

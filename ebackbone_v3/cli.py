@@ -181,6 +181,34 @@ def build_parser() -> argparse.ArgumentParser:
     debug_b0_parser.add_argument("--seed", type=int, default=20260715)
     debug_b0_parser.add_argument("--target-train-accuracy", type=float, default=0.95)
     debug_b0_parser.set_defaults(handler=_handle_train_b0_debug)
+
+    integration_b0_parser = subparsers.add_parser(
+        "diagnose-b0-train",
+        help=(
+            "Run a bounded production-ResNet integration diagnostic on 8--16 "
+            "project-train samples only."
+        ),
+    )
+    integration_b0_parser.add_argument("--manifest-dir", required=True)
+    integration_b0_parser.add_argument(
+        "--dataset-root", default="/mnt/hdd1/datasets/event/n_imagenet"
+    )
+    integration_b0_parser.add_argument("--output-dir", required=True)
+    integration_b0_parser.add_argument("--subset-size", type=int, default=8)
+    integration_b0_parser.add_argument("--batch-size", type=int, default=4)
+    integration_b0_parser.add_argument("--max-steps", type=int, default=100)
+    integration_b0_parser.add_argument("--evaluation-interval", type=int, default=10)
+    integration_b0_parser.add_argument("--learning-rate", type=float, default=0.05)
+    integration_b0_parser.add_argument("--momentum", type=float, default=0.9)
+    integration_b0_parser.add_argument("--weight-decay", type=float, default=0.0)
+    integration_b0_parser.add_argument("--seed", type=int, default=20260715)
+    integration_b0_parser.add_argument(
+        "--device",
+        choices=("cpu", "cuda:1"),
+        default="cpu",
+        help="CPU by default; cuda:1 is the only permitted explicit GPU device.",
+    )
+    integration_b0_parser.set_defaults(handler=_handle_diagnose_b0_train)
     return parser
 
 
@@ -274,6 +302,25 @@ def _handle_train_b0_debug(args: argparse.Namespace) -> dict[str, Any]:
         learning_rate=args.learning_rate,
         seed=args.seed,
         target_train_accuracy=args.target_train_accuracy,
+    )
+
+
+def _handle_diagnose_b0_train(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.b0_integration import run_b0_train_integration
+
+    return run_b0_train_integration(
+        manifest_dir=args.manifest_dir,
+        dataset_root=args.dataset_root,
+        output_dir=args.output_dir,
+        subset_size=args.subset_size,
+        batch_size=args.batch_size,
+        max_steps=args.max_steps,
+        evaluation_interval=args.evaluation_interval,
+        learning_rate=args.learning_rate,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+        seed=args.seed,
+        device_name=args.device,
     )
 
 

@@ -124,11 +124,35 @@ archive member.
 `train-b0-debug` is intentionally limited to the first real-data B0 validation: a
 deterministic 4--16 sample CPU overfit run from explicit project `train`. It materializes only
 the selected production `[2,480,640]` float32 event frames in memory, uses the
-same accepted B0 model as production train/validation, and writes a
+explicit 68,148-parameter `compact_debug` engineering model, and writes a
 checkpoint with strict reload/logit-equivalence verification. It does not
 provide a full-dataset mode, access validation/test rows, augment inputs, or
 read/write the representation cache. PASS requires the requested fixed-subset
 accuracy and a final evaluation loss no greater than 25% of the initial loss.
+This diagnostic is not the scientific B0 architecture and its results are not
+valid B0 accuracy results.
+
+`diagnose-b0-train` is the separate bounded integration check for the scientific
+ResNet-18 path:
+
+```bash
+python main.py diagnose-b0-train \
+  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
+  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
+  --output-dir /path/to/new-diagnostic \
+  --subset-size 8 --batch-size 4 --max-steps 100 \
+  --evaluation-interval 10 --learning-rate 0.05 \
+  --momentum 0.9 --weight-decay 0 --seed 20260715 --device cpu
+```
+
+It deterministically selects only project-train samples, decodes their real NPZ
+payloads, renders and collates event frames, exercises the production ResNet-18,
+and verifies backward/update plus exact BatchNorm and evaluation-logit checkpoint
+restoration. CPU is the default. `cuda:1` is the only permitted GPU spelling and
+must be checked idle before use; `cuda:0` is rejected. The command accepts 8-16
+samples, requires batch size at least 4, caps execution at 200 optimizer steps,
+and never exposes a validation/final-test split argument. Its metrics are
+engineering evidence only.
 
 Production B0 training is a separate command and architecture:
 
@@ -137,21 +161,23 @@ python main.py train-b0 \
   --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /path/outside-or-inside-worktree/to/new-run \
-  --epochs 100 --batch-size 4 --learning-rate 0.05 \
+  --epochs 100 --batch-size 1 --learning-rate 0.05 \
   --momentum 0.9 --weight-decay 0.0001 \
   --seed 20260715 --num-workers 0 --prefetch-factor 2 --device cpu
 ```
 
-The D015 production model is a random-initialized 68,148-parameter compact CNN
-adapted to the fixed two-channel native-resolution event frame. Its four
-convolutions downsample by `4,2,2,2`, it uses no model-side normalization,
-adaptive global average pooling, exactly one `Linear(64,100)` classifier, and
-cross-entropy. The command
+The D014 production model is a randomly initialized 11,224,676-parameter
+ResNet-18 adapted to the fixed two-channel native-resolution event frame. It
+uses `Conv2d(2,64,7,stride=2,padding=3,bias=False)`, standard ResNet-18 residual
+stages and BatchNorm, max-pooling, adaptive global average pooling to a
+512-dimensional embedding, exactly one `Linear(512,100)` classifier, and
+cross-entropy. The local implementation has no external-weight or network-loading
+path. The command
 uses only project train samples for optimization and the complete project
 validation manifest for best-checkpoint selection. Project test manifests are
 not accepted. It writes atomic best/last checkpoints, append-only JSONL batch
 and epoch logs, a JSON report, top-1/top-5 metrics, throughput, peak GPU memory,
-and strict reload evidence. CPU, batch size 4, and zero loader workers are the
+and strict reload evidence. CPU, batch size 1, and zero loader workers are the
 bounded defaults; CUDA requires explicit `--device cuda`. Resume requires `checkpoint_last.pt` and an exact
 match of model, optimizer, scheduler, seed, manifest hashes, renderer provenance,
 and loader configuration.

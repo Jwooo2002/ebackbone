@@ -201,7 +201,7 @@ The production tensor is the D012 float32 `[2,480,640]` negative/positive
 
 ### Production training and checkpoint selection
 
-D015 uses the complete immutable project `train.jsonl` for optimizer updates
+D014 uses the complete immutable project `train.jsonl` for optimizer updates
 and the complete immutable project `validation.jsonl` only for checkpoint
 selection. The selection rule is highest validation top-1 accuracy, breaking a
 tie with lower validation cross-entropy and then retaining the earlier epoch.
@@ -214,6 +214,18 @@ train/validation manifest hashes and counts, renderer contract/config/fingerprin
 epoch history, and selection state. `checkpoint_last.pt` is the only resume
 source; an exact run-configuration match is required. `checkpoint_best.pt` is
 selection output, not a resume source.
+
+### Bounded production-path integration diagnostic
+
+`diagnose-b0-train` is separate from production training. Its API hard-codes
+project `train`, `baseline="b0"`, and `cache="off"`; it has no validation/test
+selector or final-test override. It selects 8-16 sample IDs deterministically
+without labels, requires a real batch size of at least 4, and permits no more
+than 200 optimizer steps. Only event frames are decoded, rendered, and collated.
+The diagnostic verifies production ResNet-18 loss/backward/update behavior and
+strict checkpoint restoration, including BatchNorm running buffers and exact
+evaluation logits. Results are pipeline engineering evidence, not accuracy or
+checkpoint-selection evidence.
 
 ### Test input
 

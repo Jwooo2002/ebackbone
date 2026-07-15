@@ -26,8 +26,8 @@ from ebackbone_v3.errors import TrainingError
 from ebackbone_v3.b0_models import (
     B0_CLASS_COUNT,
     B0_INPUT_SHAPE,
-    B0FrameClassifier,
-    PRODUCTION_MODEL_NAME,
+    CompactDebugB0FrameClassifier,
+    DEBUG_MODEL_NAME,
     build_b0_model,
     native_input_batch_bytes,
     trainable_parameter_count,
@@ -39,7 +39,7 @@ from ebackbone_v3.n_imagenet_mini_dataset import (
 )
 
 
-B0_TRAINING_SCHEMA_VERSION = 2
+B0_TRAINING_SCHEMA_VERSION = 3
 TINY_SUBSET_MIN_SIZE = 4
 TINY_SUBSET_MAX_SIZE = 16
 TINY_LOSS_REDUCTION_RATIO = 0.25
@@ -133,7 +133,7 @@ def train_one_optimizer_step(
 def save_checkpoint(
     path: str | Path,
     *,
-    model: B0FrameClassifier,
+    model: CompactDebugB0FrameClassifier,
     optimizer: torch.optim.Optimizer,
     selection: TinySubsetSelection,
     epochs: Sequence[dict[str, Any]],
@@ -147,7 +147,7 @@ def save_checkpoint(
     torch.save(
         {
             "schema_version": B0_TRAINING_SCHEMA_VERSION,
-            "model": {"name": PRODUCTION_MODEL_NAME, "class_count": model.class_count},
+            "model": {"name": DEBUG_MODEL_NAME, "class_count": model.class_count},
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "tiny_subset": asdict(selection),
@@ -161,7 +161,7 @@ def save_checkpoint(
 def verify_checkpoint_round_trip(
     path: str | Path,
     *,
-    reference_model: B0FrameClassifier,
+    reference_model: CompactDebugB0FrameClassifier,
     reference_inputs: Tensor,
     device: torch.device,
 ) -> dict[str, Any]:
@@ -174,7 +174,7 @@ def verify_checkpoint_round_trip(
     if (
         not isinstance(model_config, dict)
         or set(model_config) != {"name", "class_count"}
-        or model_config["name"] != PRODUCTION_MODEL_NAME
+        or model_config["name"] != DEBUG_MODEL_NAME
     ):
         raise TrainingError("checkpoint model configuration is invalid")
     reloaded = build_b0_model(
@@ -271,7 +271,7 @@ def _run_tiny_overfit_in_output_dir(
     loader = DataLoader(
         TensorDataset(frames, labels), batch_size=batch_size, shuffle=False, num_workers=0
     )
-    model = B0FrameClassifier().to(device)
+    model = CompactDebugB0FrameClassifier().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     initial_metrics = _training_metrics(model, loader, device)
@@ -347,8 +347,8 @@ def _run_tiny_overfit_in_output_dir(
             "representation_cache": "off; no cache entry was read or written",
         },
         "model": {
-            "name": PRODUCTION_MODEL_NAME,
-            "role": "accepted_production_b0_model",
+            "name": DEBUG_MODEL_NAME,
+            "role": "engineering_debug_only",
             "architecture": "Conv2d(2,16,7,s4)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
             "Conv2d(32,64,3,s2)-ReLU-Conv2d(64,64,3,s2)-ReLU-GAP-Linear(64,100)",
             "model_side_normalization": "none",
@@ -470,7 +470,7 @@ def _require_new_or_empty_output_dir(path: Path) -> None:
 __all__ = [
     "B0_CLASS_COUNT",
     "B0_INPUT_SHAPE",
-    "B0FrameClassifier",
+    "CompactDebugB0FrameClassifier",
     "TinySubsetSelection",
     "run_tiny_overfit",
     "save_checkpoint",
