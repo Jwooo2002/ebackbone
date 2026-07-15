@@ -10,9 +10,10 @@ Each sample has:
 - one class label
 - a stable sample identifier
 
-For the first real-data probe, the selected dataset and whole-stored-sample
-policy are recorded in D009-D011 of `DECISIONS.md`. Whether a later production
-B0/B1 pipeline adopts the probe renderer unchanged remains `TBD`.
+The selected dataset and whole-stored-sample policy are recorded in D009-D010.
+D011 defines the probe-only renderer; D012 separately defines the production
+B0/B1 representations. The probe renderer must not be substituted for the
+production renderer or reinterpreted as production evidence.
 
 ## Raw event contract
 
@@ -45,13 +46,18 @@ The following parameters must be recorded:
 - clipping
 - padding or truncation
 
-Do not invent unresolved values. Mark them `TBD`.
+For N-ImageNet mini B0/B1, D012 resolves these representation parameters.
+Architecture and augmentation parameters remain separate decisions and must not
+be inferred from the renderer.
 
 ## B0 protocol
 
 ### Train input
 
 Event frame generated from the raw event sample.
+
+The production tensor is the D012 float32 `[2,480,640]` negative/positive
+`log1p` count frame.
 
 ### Test input
 
@@ -66,6 +72,9 @@ Event frame generated using the same rendering policy as training.
 - time surface
 
 All three must come from the same raw event sample and temporal interval.
+
+Their production shapes are frame `[2,480,640]`, voxel `[2,5,480,640]`, and
+time surface `[2,480,640]`; all use the D012 polarity order and provenance.
 
 ### Test input
 

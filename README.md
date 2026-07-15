@@ -60,6 +60,11 @@ resolved N-ImageNet mini configs exercise the verified archive-native provider a
 the local dataset root `/mnt/hdd1/datasets/event/n_imagenet`. See
 `docs/PROBE_PROVIDER_CONTRACT.md` and D009-D011 in `docs/DECISIONS.md`.
 
+The production representation contract is implemented separately in
+`ebackbone_v3/representations.py` and recorded in D012. It fixes the B0 frame
+and aligned B1 frame/voxel/time-surface tensors without implementing a model or
+training loop.
+
 ## Development setup
 
 Python 3.10 or newer, NumPy 1.24 or newer, and PyTorch 2.0 or newer are required.

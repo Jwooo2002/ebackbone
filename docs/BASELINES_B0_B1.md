@@ -18,7 +18,8 @@ The pooling and fusion details are not fixed yet.
 
 One event-frame representation generated from a raw event sample.
 
-Whether this is one accumulated frame or a sequence of event frames is `TBD` and must be decided from the target dataset and downstream convention.
+For N-ImageNet mini, D012 selects one accumulated native-resolution,
+polarity-separated `log1p` count frame. A frame sequence is not part of B0.
 
 ### Model contract
 
@@ -85,7 +86,7 @@ Do not resolve these implicitly during implementation:
 3. shared, partially shared, or separate encoder weights
 4. pooling method
 5. representation-specific stems
-6. normalization per representation
+6. representation-specific model-side normalization beyond the fixed D012 input transforms
 7. compute-matched versus parameter-matched auxiliary comparisons
 
 Each decision requires a bounded design task and an entry in `DECISIONS.md`.
