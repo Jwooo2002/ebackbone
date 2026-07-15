@@ -55,7 +55,7 @@ python main.py train-b0-debug \
   --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /tmp/ebackbone-v3-b0-tiny-overfit \
-  --subset-size 16 --epochs 240 --batch-size 16 --learning-rate 0.01 --seed 20260715
+  --subset-size 8 --epochs 120 --batch-size 4 --learning-rate 0.01 --seed 20260715
 ```
 
 The two smoke commands are deterministic CPU-only execution checks. They use
@@ -106,7 +106,10 @@ contract, and renders the D012 production representations. It is CPU-only and
 reports metadata plus tensor shapes, dtypes, and ranges only: it does not create
 or run a model, batch samples, augment data, or start training.
 
-With `--baseline b0`, inspection returns the frame input only. With
+With `--baseline b0`, inspection invokes the dedicated frame renderer and returns
+the frame input only; it does not allocate voxel or time-surface tensors. B0
+therefore requires `--cache off`, because the current cache schema is a full
+three-representation bundle. With
 `--baseline b1`, it returns the frame, voxel grid, and time surface from the
 same verified raw-event fingerprint and temporal interval. `--cache off` reads
 and writes no cache. `--cache on` requires an explicit `--cache-root <path>`;
@@ -119,12 +122,13 @@ fail-closed: inspecting `test.jsonl` requires both `--split test` and
 archive member.
 
 `train-b0-debug` is intentionally limited to the first real-data B0 validation: a
-deterministic 16--32 sample overfit run from explicit project `train`. It materializes only
-the selected production `[2,480,640]` float32 event frames in memory, performs
-the explicit tiny debug CNN plus linear-head cross-entropy training, and writes a
+deterministic 4--16 sample CPU overfit run from explicit project `train`. It materializes only
+the selected production `[2,480,640]` float32 event frames in memory, uses the
+same accepted B0 model as production train/validation, and writes a
 checkpoint with strict reload/logit-equivalence verification. It does not
 provide a full-dataset mode, access validation/test rows, augment inputs, or
-read/write the representation cache.
+read/write the representation cache. PASS requires the requested fixed-subset
+accuracy and a final evaluation loss no greater than 25% of the initial loss.
 
 Production B0 training is a separate command and architecture:
 
@@ -133,19 +137,22 @@ python main.py train-b0 \
   --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /path/outside-or-inside-worktree/to/new-run \
-  --epochs 100 --batch-size 64 --learning-rate 0.05 \
+  --epochs 100 --batch-size 4 --learning-rate 0.05 \
   --momentum 0.9 --weight-decay 0.0001 \
-  --seed 20260715 --num-workers 28 --prefetch-factor 2
+  --seed 20260715 --num-workers 0 --prefetch-factor 2 --device cpu
 ```
 
-The D014 production model is a random-initialized ResNet-18 adapted to the fixed
-two-channel native-resolution event frame. It uses adaptive global average
-pooling, exactly one `Linear(512,100)` classifier, and cross-entropy. The command
+The D015 production model is a random-initialized 68,148-parameter compact CNN
+adapted to the fixed two-channel native-resolution event frame. Its four
+convolutions downsample by `4,2,2,2`, it uses no model-side normalization,
+adaptive global average pooling, exactly one `Linear(64,100)` classifier, and
+cross-entropy. The command
 uses only project train samples for optimization and the complete project
 validation manifest for best-checkpoint selection. Project test manifests are
 not accepted. It writes atomic best/last checkpoints, append-only JSONL batch
 and epoch logs, a JSON report, top-1/top-5 metrics, throughput, peak GPU memory,
-and strict reload evidence. Resume requires `checkpoint_last.pt` and an exact
+and strict reload evidence. CPU, batch size 4, and zero loader workers are the
+bounded defaults; CUDA requires explicit `--device cuda`. Resume requires `checkpoint_last.pt` and an exact
 match of model, optimizer, scheduler, seed, manifest hashes, renderer provenance,
 and loader configuration.
 

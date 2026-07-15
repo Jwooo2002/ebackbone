@@ -10,7 +10,8 @@ loss = cross_entropy(class_logits, class_label)
 
 Both use a single linear classification head after the encoder output has been reduced to one sample-level embedding.
 
-The pooling and fusion details are not fixed yet.
+The B1 pooling and fusion details are not fixed yet. D015 fixes only the B0
+production architecture and pooling choice.
 
 ## B0 — Frame-only baseline
 
@@ -30,6 +31,15 @@ frame tensor
 → linear classification head
 → class logits
 ```
+
+### Selected production architecture
+
+D015 selects one compact four-convolution encoder for production training,
+validation, checkpoint reload, and the `train-b0-debug` engineering diagnostic.
+Its explicit stride sequence is `4,2,2,2`; it uses ReLU without model-side
+normalization, adaptive global average pooling to one 64-dimensional embedding,
+and exactly one `Linear(64,100)` classifier. It has 68,148 trainable parameters,
+is always randomly initialized, and has no pretrained-weight loading path.
 
 ### Initialization
 
@@ -84,7 +94,7 @@ Do not resolve these implicitly during implementation:
 1. one accumulated frame versus frame sequence
 2. input-level, feature-level, or embedding-level fusion
 3. shared, partially shared, or separate encoder weights
-4. pooling method
+4. B1 pooling method (B0 global average pooling is fixed by D015)
 5. representation-specific stems
 6. representation-specific model-side normalization beyond the fixed D012 input transforms
 7. compute-matched versus parameter-matched auxiliary comparisons

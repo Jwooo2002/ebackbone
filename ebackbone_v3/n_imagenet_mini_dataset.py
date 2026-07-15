@@ -40,6 +40,7 @@ from ebackbone_v3.representations import (
     cache_path,
     compute_event_fingerprint,
     read_representation_cache,
+    render_production_event_frame,
     render_production_representations,
     representation_cache_key,
     write_representation_cache,
@@ -165,6 +166,11 @@ class _ManifestBackedNImageNetMiniDataset:
             raise DatasetError("cache must be 'off' or 'on'")
         if cache == "on" and cache_root is None:
             raise DatasetError("cache='on' requires an explicit cache_root")
+        if baseline == "b0" and cache != "off":
+            raise DatasetError(
+                "B0 requires cache='off' so frame-only access never reads or creates "
+                "voxel-grid or time-surface cache entries"
+            )
         if renderer_config != DEFAULT_RENDERER_CONFIG:
             raise DatasetError(
                 "the manifest-backed adapter accepts only the fixed D012 production renderer"
@@ -255,6 +261,9 @@ class _ManifestBackedNImageNetMiniDataset:
         fields: Mapping[str, np.ndarray],
         source: SourceIdentity,
     ) -> tuple[Any, str, Path | None]:
+        if self.baseline == "b0":
+            return _render_frame(fields, source, self.renderer_config), "off", None
+
         try:
             expected_key = representation_cache_key(
                 source=source,
@@ -949,6 +958,17 @@ def _render(
         return render_production_representations(fields, source=source, config=config)
     except RepresentationError as exc:
         raise DatasetError(f"could not render production representations: {exc}") from exc
+
+
+def _render_frame(
+    fields: Mapping[str, np.ndarray],
+    source: SourceIdentity,
+    config: RendererConfig,
+) -> Any:
+    try:
+        return render_production_event_frame(fields, source=source, config=config)
+    except RepresentationError as exc:
+        raise DatasetError(f"could not render production event frame: {exc}") from exc
 
 
 def _parse_class_mapping(value: object) -> dict[str, int]:

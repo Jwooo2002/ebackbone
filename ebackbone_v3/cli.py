@@ -136,17 +136,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="New output directory, or the existing run directory with --resume.",
     )
     train_b0_parser.add_argument("--epochs", type=int, required=True)
-    train_b0_parser.add_argument("--batch-size", type=int, default=32)
+    train_b0_parser.add_argument("--batch-size", type=int, default=4)
     train_b0_parser.add_argument("--learning-rate", type=float, default=0.05)
     train_b0_parser.add_argument("--momentum", type=float, default=0.9)
     train_b0_parser.add_argument("--weight-decay", type=float, default=1e-4)
     train_b0_parser.add_argument("--seed", type=int, default=20260715)
-    train_b0_parser.add_argument("--num-workers", type=int, default=16)
+    train_b0_parser.add_argument("--num-workers", type=int, default=0)
     train_b0_parser.add_argument("--prefetch-factor", type=int, default=2)
     train_b0_parser.add_argument(
         "--no-amp",
         action="store_true",
         help="Disable CUDA bfloat16 autocast (autocast is enabled by default on CUDA).",
+    )
+    train_b0_parser.add_argument(
+        "--device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="Execution device; CPU is the fail-safe default and CUDA requires explicit selection.",
     )
     train_b0_parser.add_argument(
         "--stop-after-epoch",
@@ -161,16 +167,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     debug_b0_parser = subparsers.add_parser(
         "train-b0-debug",
-        help="Run only the explicit 16--32 sample tiny-overfit debug diagnostic.",
+        help="Run only the explicit 4--16 sample CPU tiny-overfit engineering diagnostic.",
     )
     debug_b0_parser.add_argument("--manifest-dir", required=True)
     debug_b0_parser.add_argument(
         "--dataset-root", default="/mnt/hdd1/datasets/event/n_imagenet"
     )
     debug_b0_parser.add_argument("--output-dir", required=True)
-    debug_b0_parser.add_argument("--subset-size", type=int, default=16)
-    debug_b0_parser.add_argument("--epochs", type=int, default=240)
-    debug_b0_parser.add_argument("--batch-size", type=int, default=16)
+    debug_b0_parser.add_argument("--subset-size", type=int, default=8)
+    debug_b0_parser.add_argument("--epochs", type=int, default=120)
+    debug_b0_parser.add_argument("--batch-size", type=int, default=4)
     debug_b0_parser.add_argument("--learning-rate", type=float, default=0.01)
     debug_b0_parser.add_argument("--seed", type=int, default=20260715)
     debug_b0_parser.add_argument("--target-train-accuracy", type=float, default=0.95)
@@ -249,6 +255,7 @@ def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
         amp=not args.no_amp,
+        device_name=args.device,
         stop_after_epoch=args.stop_after_epoch,
         resume=args.resume,
     )

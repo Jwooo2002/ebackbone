@@ -78,3 +78,24 @@ def test_tiny_subset_selection_is_deterministic_and_label_independent() -> None:
     assert first.sample_ids != changed_seed.sample_ids
     assert len(first.sample_ids) == 16
     assert "labels are not read" in first.selection_rule
+
+
+def test_fixed_native_resolution_tiny_subset_substantially_reduces_loss() -> None:
+    torch.manual_seed(12)
+    frames = torch.zeros((4, 2, 480, 640), dtype=torch.float32)
+    frames[0, 0].fill_(1.0)
+    frames[1, 1].fill_(1.0)
+    frames[2, 0].fill_(0.75)
+    frames[3, 1].fill_(0.75)
+    labels = torch.tensor([0, 1, 0, 1], dtype=torch.long)
+    model = B0FrameClassifier(class_count=2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+    with torch.no_grad():
+        initial_loss = float(F.cross_entropy(model(frames), labels).item())
+    for _ in range(24):
+        train_one_optimizer_step(model, optimizer, frames, labels)
+    with torch.no_grad():
+        final_loss = float(F.cross_entropy(model(frames), labels).item())
+
+    assert final_loss < initial_loss * 0.25

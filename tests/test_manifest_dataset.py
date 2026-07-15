@@ -345,6 +345,7 @@ def test_denied_final_test_access_reads_no_manifest_or_archive(
             manifest_dir=fixture_release.manifest_dir,
             split="test",
             dataset_root=fixture_release.dataset_root,
+            baseline="b0",
         )
 
 
@@ -532,6 +533,7 @@ def test_b0_frame_only_and_b1_bundle_share_identity_and_interval(
 
     assert set(b0.tensors) == {"event_frame"}
     assert set(b1.tensors) == {"event_frame", "voxel_grid", "time_surface"}
+    np.testing.assert_array_equal(b0.tensors["event_frame"], b1.tensors["event_frame"])
     assert b1.tensors["event_frame"].shape == (2, 480, 640)
     assert b1.tensors["voxel_grid"].shape == (2, 5, 480, 640)
     assert b1.tensors["time_surface"].shape == (2, 480, 640)
@@ -553,6 +555,32 @@ def test_b0_frame_only_and_b1_bundle_share_identity_and_interval(
         b1.metadata.event_count,
         abs=1e-5,
     )
+
+
+def test_b0_never_calls_tri_representation_renderer_or_cache_path(
+    fixture_release: FixtureRelease,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dataset_module,
+        "render_production_representations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("B0 requested voxel grid or time surface")
+        ),
+    )
+    sample = _dataset(fixture_release, "train", baseline="b0", cache="off")[0]
+    assert set(sample.tensors) == {"event_frame"}
+    assert sample.metadata.cache_status == "off"
+
+    with pytest.raises(DatasetError, match="frame-only access"):
+        _dataset(
+            fixture_release,
+            "train",
+            baseline="b0",
+            cache="on",
+            cache_root=tmp_path / "cache",
+        )
 
 
 def test_cache_hit_miss_and_stale_renderer_or_contract_entries_are_rebuilt(
@@ -602,7 +630,7 @@ def test_raw_payload_hash_change_uses_a_new_cache_entry(
     original = _dataset(
         fixture_release,
         "train",
-        baseline="b0",
+        baseline="b1",
         cache="on",
         cache_root=cache_root,
     )[0]
@@ -623,7 +651,7 @@ def test_raw_payload_hash_change_uses_a_new_cache_entry(
     changed = _dataset(
         changed_release,
         "train",
-        baseline="b0",
+        baseline="b1",
         cache="on",
         cache_root=cache_root,
     )[0]

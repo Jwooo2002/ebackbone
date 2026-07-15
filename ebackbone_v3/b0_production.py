@@ -20,10 +20,11 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from ebackbone_v3.b0_models import (
+    B0_BOUNDED_CPU_BATCH_SIZE,
     B0_CLASS_COUNT,
     B0_INPUT_SHAPE,
+    B0FrameClassifier,
     PRODUCTION_MODEL_NAME,
-    ProductionB0ResNet18,
     build_b0_model,
     trainable_parameter_count,
 )
@@ -41,8 +42,8 @@ from ebackbone_v3.representations import (
 )
 
 
-PRODUCTION_CHECKPOINT_SCHEMA_VERSION = 1
-PRODUCTION_REPORT_SCHEMA_VERSION = 1
+PRODUCTION_CHECKPOINT_SCHEMA_VERSION = 2
+PRODUCTION_REPORT_SCHEMA_VERSION = 2
 CHECKPOINT_LAST_FILENAME = "checkpoint_last.pt"
 CHECKPOINT_BEST_FILENAME = "checkpoint_best.pt"
 LOG_FILENAME = "metrics.jsonl"
@@ -166,14 +167,15 @@ def run_production_b0(
     dataset_root: str | Path = DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
     output_dir: str | Path,
     epochs: int,
-    batch_size: int = 32,
+    batch_size: int = B0_BOUNDED_CPU_BATCH_SIZE,
     learning_rate: float = 0.05,
     momentum: float = 0.9,
     weight_decay: float = 1e-4,
     seed: int = 20260715,
-    num_workers: int = 16,
+    num_workers: int = 0,
     prefetch_factor: int = 2,
     amp: bool = True,
+    device_name: str = "cpu",
     stop_after_epoch: int | None = None,
     resume: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -187,13 +189,14 @@ def run_production_b0(
         weight_decay=weight_decay,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
+        device_name=device_name,
         stop_after_epoch=stop_after_epoch,
     )
     output = Path(output_dir).expanduser().resolve()
     resume_path = Path(resume).expanduser().resolve() if resume is not None else None
+    device = _resolve_device(device_name)
     _prepare_output_directory(output, resume_path=resume_path)
-    _seed_everything(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _seed_everything(seed, include_cuda=device.type == "cuda")
     use_amp = bool(amp and device.type == "cuda")
 
     # Roles are explicit at the canonical boundary; no filename selects a split.
@@ -235,7 +238,7 @@ def run_production_b0(
         device=device,
     )
 
-    model = ProductionB0ResNet18(class_count=B0_CLASS_COUNT).to(device)
+    model = B0FrameClassifier(class_count=B0_CLASS_COUNT).to(device)
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=learning_rate,
@@ -375,12 +378,14 @@ def run_production_b0(
         "model": {
             "name": PRODUCTION_MODEL_NAME,
             "architecture": (
-                "ResNet-18 basic blocks; Conv2d(2,64,7,s2) stem; "
-                "AdaptiveAvgPool2d(1); Linear(512,100)"
+                "Conv2d(2,16,7,s4)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
+                "Conv2d(32,64,3,s2)-ReLU-Conv2d(64,64,3,s2)-ReLU-"
+                "AdaptiveAvgPool2d(1)-Linear(64,100)"
             ),
-            "initialization": "random Kaiming-normal convolution weights; no pretrained path",
+            "initialization": "PyTorch random initialization; no pretrained path",
+            "model_side_normalization": "none",
             "global_pooling": "adaptive average pooling to 1x1",
-            "classifier": "one Linear(512,100)",
+            "classifier": "one Linear(64,100)",
             "trainable_parameter_count": trainable_parameter_count(model),
         },
         "history": history,
@@ -650,7 +655,7 @@ def _checkpoint_payload(
             "class_count": B0_CLASS_COUNT,
             "initialization": "random",
             "global_pooling": "AdaptiveAvgPool2d((1,1))",
-            "classifier": "Linear(512,100)",
+            "classifier": "Linear(64,100)",
         },
         "model_state_dict": model.state_dict(),
         "optimizer": run_config["optimizer"],
@@ -699,6 +704,7 @@ def _run_config(
             "class_count": B0_CLASS_COUNT,
             "initialization": "random",
             "pretrained_weights": None,
+            "model_side_normalization": "none",
         },
         "objective": "cross_entropy",
         "optimizer": {
@@ -815,6 +821,7 @@ def _validate_arguments(
     weight_decay: float,
     num_workers: int,
     prefetch_factor: int,
+    device_name: str,
     stop_after_epoch: int | None,
 ) -> None:
     for name, value in (("epochs", epochs), ("batch_size", batch_size)):
@@ -830,16 +837,24 @@ def _validate_arguments(
         raise TrainingError("num_workers must be a non-negative integer")
     if isinstance(prefetch_factor, bool) or not isinstance(prefetch_factor, int) or prefetch_factor <= 0:
         raise TrainingError("prefetch_factor must be a positive integer")
+    if device_name not in {"cpu", "cuda"}:
+        raise TrainingError("device_name must be 'cpu' or 'cuda'")
     if stop_after_epoch is not None and not 1 <= stop_after_epoch <= epochs:
         raise TrainingError("stop_after_epoch must be between one and epochs")
 
 
-def _seed_everything(seed: int) -> None:
+def _resolve_device(device_name: str) -> torch.device:
+    if device_name == "cuda" and not torch.cuda.is_available():
+        raise TrainingError("CUDA was explicitly requested but is not available")
+    return torch.device(device_name)
+
+
+def _seed_everything(seed: int, *, include_cuda: bool) -> None:
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
+    if include_cuda:
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True

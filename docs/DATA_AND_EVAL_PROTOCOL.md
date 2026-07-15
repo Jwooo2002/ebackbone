@@ -167,14 +167,16 @@ project split, source split, exact raw payload hash, canonical raw-event
 fingerprint, temporal start/end and closure, event count, and renderer
 fingerprint.
 
-For B0 access, the public output contains only the event-frame tensor and this
-metadata. For B1 access, it contains the event frame, voxel grid, and time
+For B0 access, a dedicated frame-only renderer is called and the public output
+contains only the event-frame tensor and this metadata; voxel and time-surface
+tensors are neither requested nor allocated. For B1 access, it contains the event frame, voxel grid, and time
 surface. All B1 tensors are bound to the same verified raw-event fingerprint and
 the same closed observed-support interval; a matching shape alone is not
 accepted as alignment evidence.
 
-Caching is optional and on-demand. Cache-off performs no cache read or write.
-Cache-on requires an explicit cache root; there is no hidden cache location and
+Caching is optional and on-demand for B1. B0 requires cache-off because the
+current cache schema stores the full three-representation bundle. Cache-off
+performs no cache read or write. B1 cache-on requires an explicit cache root; there is no hidden cache location and
 the adapter never precomputes the release. A cache candidate is accepted only
 after its provenance matches the production renderer fingerprint and contract
 version, project/source split identity, the exact manifest raw-payload SHA-256,
@@ -199,7 +201,7 @@ The production tensor is the D012 float32 `[2,480,640]` negative/positive
 
 ### Production training and checkpoint selection
 
-D014 uses the complete immutable project `train.jsonl` for optimizer updates
+D015 uses the complete immutable project `train.jsonl` for optimizer updates
 and the complete immutable project `validation.jsonl` only for checkpoint
 selection. The selection rule is highest validation top-1 accuracy, breaking a
 tie with lower validation cross-entropy and then retaining the earlier epoch.

@@ -1,7 +1,7 @@
 """Minimal, bounded B0 training on immutable production event frames.
 
 This module intentionally implements only the first required real-data
-validation: deterministic overfitting of 16--32 project-train samples.  It
+validation: deterministic overfitting of 4--16 project-train samples.  It
 does not load validation/test rows, alter the manifest-backed adapter, write a
 representation cache, augment inputs, or provide a full-dataset training mode.
 """
@@ -26,8 +26,10 @@ from ebackbone_v3.errors import TrainingError
 from ebackbone_v3.b0_models import (
     B0_CLASS_COUNT,
     B0_INPUT_SHAPE,
-    DEBUG_MODEL_NAME,
-    TinyDebugB0FrameClassifier,
+    B0FrameClassifier,
+    PRODUCTION_MODEL_NAME,
+    build_b0_model,
+    native_input_batch_bytes,
     trainable_parameter_count,
 )
 from ebackbone_v3.n_imagenet_mini_dataset import (
@@ -37,9 +39,10 @@ from ebackbone_v3.n_imagenet_mini_dataset import (
 )
 
 
-B0_TRAINING_SCHEMA_VERSION = 1
-TINY_SUBSET_MIN_SIZE = 16
-TINY_SUBSET_MAX_SIZE = 32
+B0_TRAINING_SCHEMA_VERSION = 2
+TINY_SUBSET_MIN_SIZE = 4
+TINY_SUBSET_MAX_SIZE = 16
+TINY_LOSS_REDUCTION_RATIO = 0.25
 TINY_SELECTION_NAMESPACE = b"ebackbone-v3/b0/tiny-overfit/v1\0"
 
 
@@ -130,7 +133,7 @@ def train_one_optimizer_step(
 def save_checkpoint(
     path: str | Path,
     *,
-    model: TinyDebugB0FrameClassifier,
+    model: B0FrameClassifier,
     optimizer: torch.optim.Optimizer,
     selection: TinySubsetSelection,
     epochs: Sequence[dict[str, Any]],
@@ -144,7 +147,7 @@ def save_checkpoint(
     torch.save(
         {
             "schema_version": B0_TRAINING_SCHEMA_VERSION,
-            "model": {"class_count": model.class_count},
+            "model": {"name": PRODUCTION_MODEL_NAME, "class_count": model.class_count},
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "tiny_subset": asdict(selection),
@@ -158,7 +161,7 @@ def save_checkpoint(
 def verify_checkpoint_round_trip(
     path: str | Path,
     *,
-    reference_model: TinyDebugB0FrameClassifier,
+    reference_model: B0FrameClassifier,
     reference_inputs: Tensor,
     device: torch.device,
 ) -> dict[str, Any]:
@@ -168,9 +171,15 @@ def verify_checkpoint_round_trip(
     if checkpoint.get("schema_version") != B0_TRAINING_SCHEMA_VERSION:
         raise TrainingError("checkpoint schema version does not match B0 training")
     model_config = checkpoint.get("model")
-    if not isinstance(model_config, dict) or set(model_config) != {"class_count"}:
+    if (
+        not isinstance(model_config, dict)
+        or set(model_config) != {"name", "class_count"}
+        or model_config["name"] != PRODUCTION_MODEL_NAME
+    ):
         raise TrainingError("checkpoint model configuration is invalid")
-    reloaded = TinyDebugB0FrameClassifier(class_count=int(model_config["class_count"])).to(device)
+    reloaded = build_b0_model(
+        str(model_config["name"]), class_count=int(model_config["class_count"])
+    ).to(device)
     incompatible = reloaded.load_state_dict(checkpoint["model_state_dict"], strict=True)
     reference_model.eval()
     reloaded.eval()
@@ -197,14 +206,14 @@ def run_tiny_overfit(
     manifest_dir: str | Path,
     dataset_root: str | Path = DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
     output_dir: str | Path,
-    subset_size: int = 16,
-    epochs: int = 240,
-    batch_size: int = 16,
+    subset_size: int = 8,
+    epochs: int = 120,
+    batch_size: int = 4,
     learning_rate: float = 0.01,
     seed: int = 20260715,
     target_train_accuracy: float = 0.95,
 ) -> dict[str, Any]:
-    """Run the only supported B0 command: a deterministic 16--32 sample overfit check."""
+    """Run a deterministic, CPU-only 4--16 sample overfit check."""
 
     _validate_run_arguments(
         subset_size=subset_size,
@@ -247,7 +256,7 @@ def _run_tiny_overfit_in_output_dir(
     target_train_accuracy: float,
 ) -> dict[str, Any]:
     _seed_everything(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     dataset = open_dataset(
         manifest_dir=manifest_dir,
         dataset_root=dataset_root,
@@ -262,16 +271,14 @@ def _run_tiny_overfit_in_output_dir(
     loader = DataLoader(
         TensorDataset(frames, labels), batch_size=batch_size, shuffle=False, num_workers=0
     )
-    model = TinyDebugB0FrameClassifier().to(device)
+    model = B0FrameClassifier().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
 
+    initial_metrics = _training_metrics(model, loader, device)
     epoch_records: list[dict[str, Any]] = []
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
-        correct_sum = 0
         sample_sum = 0
         gradients_finite = True
         parameter_updated = False
@@ -284,17 +291,17 @@ def _run_tiny_overfit_in_output_dir(
                 label_batch.to(device, non_blocking=True),
             )
             loss_sum += result["loss"] * result["sample_count"]
-            correct_sum += result["correct"]
             sample_sum += result["sample_count"]
             gradients_finite = gradients_finite and result["gradients_finite"]
             parameter_updated = parameter_updated or result["parameter_updated"]
             update_l2_sum += result["parameter_update_l2"]
-        train_accuracy = _training_accuracy(model, loader, device)
+        evaluation = _training_metrics(model, loader, device)
         epoch_records.append(
             {
                 "epoch": epoch,
-                "loss": loss_sum / sample_sum,
-                "training_accuracy": train_accuracy,
+                "loss": evaluation["loss"],
+                "optimizer_step_loss": loss_sum / sample_sum,
+                "training_accuracy": evaluation["accuracy"],
                 "gradients_finite": gradients_finite,
                 "parameter_updated": parameter_updated,
                 "parameter_update_l2": update_l2_sum,
@@ -316,10 +323,17 @@ def _run_tiny_overfit_in_output_dir(
         device=device,
     )
     final_accuracy = epoch_records[-1]["training_accuracy"]
+    final_loss = epoch_records[-1]["loss"]
+    loss_reduction_ratio = final_loss / initial_metrics["loss"]
+    substantial_loss_reduction = loss_reduction_ratio <= TINY_LOSS_REDUCTION_RATIO
     report = {
         "schema_version": B0_TRAINING_SCHEMA_VERSION,
-        "status": "PASS" if final_accuracy >= target_train_accuracy else "PARTIAL",
-        "command": "train-b0",
+        "status": (
+            "PASS"
+            if final_accuracy >= target_train_accuracy and substantial_loss_reduction
+            else "PARTIAL"
+        ),
+        "command": "train-b0-debug",
         "mode": "deterministic_tiny_overfit_only",
         "baseline": "b0",
         "initialization": "random",
@@ -333,19 +347,18 @@ def _run_tiny_overfit_in_output_dir(
             "representation_cache": "off; no cache entry was read or written",
         },
         "model": {
-            "name": DEBUG_MODEL_NAME,
-            "role": "explicit_debug_model_only",
-            "architecture": "Conv2d(2,16,5,s2)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
+            "name": PRODUCTION_MODEL_NAME,
+            "role": "accepted_production_b0_model",
+            "architecture": "Conv2d(2,16,7,s4)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
             "Conv2d(32,64,3,s2)-ReLU-Conv2d(64,64,3,s2)-ReLU-GAP-Linear(64,100)",
+            "model_side_normalization": "none",
             "trainable_parameter_count": trainable_parameter_count(model),
             "class_count": B0_CLASS_COUNT,
         },
         "device": {
-            "type": device.type,
-            "name": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
-            "gpu_peak_memory_bytes": (
-                int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else None
-            ),
+            "type": "cpu",
+            "name": None,
+            "gpu_peak_memory_bytes": None,
         },
         "tiny_subset": {
             **asdict(selection),
@@ -354,6 +367,23 @@ def _run_tiny_overfit_in_output_dir(
         },
         "optimizer": {"name": "Adam", "learning_rate": learning_rate},
         "target_train_accuracy": target_train_accuracy,
+        "loss_reduction": {
+            "initial_evaluation_loss": initial_metrics["loss"],
+            "final_evaluation_loss": final_loss,
+            "final_to_initial_ratio": loss_reduction_ratio,
+            "required_maximum_ratio": TINY_LOSS_REDUCTION_RATIO,
+            "substantial_reduction_verified": substantial_loss_reduction,
+        },
+        "bounded_memory": {
+            "materialized_subset_bytes": int(frames.numel() * frames.element_size()),
+            "native_input_batch_bytes": native_input_batch_bytes(batch_size),
+            "batch_size": batch_size,
+        },
+        "test_isolation": {
+            "project_train_samples_opened": subset_size,
+            "project_validation_samples_opened": 0,
+            "project_test_samples_opened": 0,
+        },
         "epochs": epoch_records,
         "checkpoint": checkpoint_verification,
     }
@@ -384,26 +414,30 @@ def _materialize_tiny_subset(
     return torch.stack(frames), torch.tensor(labels, dtype=torch.long), first_metadata
 
 
-def _training_accuracy(model: nn.Module, loader: DataLoader[tuple[Tensor, Tensor]], device: torch.device) -> float:
+def _training_metrics(
+    model: nn.Module,
+    loader: DataLoader[tuple[Tensor, Tensor]],
+    device: torch.device,
+) -> dict[str, float]:
     model.eval()
     correct = 0
     total = 0
+    loss_sum = 0.0
     with torch.no_grad():
         for frame_batch, label_batch in loader:
+            labels = label_batch.to(device, non_blocking=True)
             logits = model(frame_batch.to(device, non_blocking=True))
-            correct += int((logits.argmax(dim=1) == label_batch.to(device, non_blocking=True)).sum().item())
+            loss_sum += float(F.cross_entropy(logits, labels, reduction="sum").item())
+            correct += int((logits.argmax(dim=1) == labels).sum().item())
             total += int(label_batch.numel())
-    return correct / total
+    return {"loss": loss_sum / total, "accuracy": correct / total}
 
 
 def _seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
 
 
 def _validate_run_arguments(
@@ -436,7 +470,7 @@ def _require_new_or_empty_output_dir(path: Path) -> None:
 __all__ = [
     "B0_CLASS_COUNT",
     "B0_INPUT_SHAPE",
-    "TinyDebugB0FrameClassifier",
+    "B0FrameClassifier",
     "TinySubsetSelection",
     "run_tiny_overfit",
     "save_checkpoint",

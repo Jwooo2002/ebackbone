@@ -146,7 +146,41 @@ class ProductionRepresentations:
         }
 
 
+@dataclass(frozen=True)
+class ProductionEventFrame:
+    """The frame-only B0 tensor and its complete source provenance."""
+
+    event_frame: np.ndarray
+    source: SourceIdentity
+    config: RendererConfig
+    cache_key: str
+
+    def tensors(self) -> dict[str, np.ndarray]:
+        return {"event_frame": self.event_frame}
+
+
 DEFAULT_RENDERER_CONFIG = RendererConfig()
+
+
+def render_production_event_frame(
+    fields: Mapping[str, np.ndarray],
+    *,
+    source: SourceIdentity,
+    config: RendererConfig = DEFAULT_RENDERER_CONFIG,
+) -> ProductionEventFrame:
+    """Render only the production B0 frame; never allocate B1 representations."""
+
+    _require_production_config(config)
+    x, y, _t, p = _validated_fields(fields, source)
+    event_frame = _render_event_frame(x=x, y=y, p=p, config=config)
+    if event_frame.dtype != np.float32 or not bool(np.isfinite(event_frame).all()):
+        raise RepresentationError("event_frame must be finite float32")
+    return ProductionEventFrame(
+        event_frame=event_frame,
+        source=source,
+        config=config,
+        cache_key=representation_cache_key(source=source, config=config),
+    )
 
 
 def render_production_representations(
@@ -167,9 +201,7 @@ def render_production_representations(
     y_out = y.astype(np.int64, copy=False)
     polarity = p.astype(np.int64, copy=False)  # False/negative=0, True/positive=1.
 
-    frame_counts = np.zeros((2, config.output_height, config.output_width), dtype=np.uint32)
-    np.add.at(frame_counts, (polarity, y_out, x_out), np.uint32(1))
-    event_frame = np.log1p(frame_counts.astype(np.float32)).astype(np.float32, copy=False)
+    event_frame = _render_event_frame(x=x, y=y, p=p, config=config)
 
     span = source.temporal_end - source.temporal_start
     if span == 0:
@@ -224,6 +256,21 @@ def render_production_representations(
             raise RepresentationError(f"{name} must be finite float32")
     cache_key = representation_cache_key(source=source, config=config)
     return ProductionRepresentations(source=source, config=config, cache_key=cache_key, **tensors)
+
+
+def _render_event_frame(
+    *,
+    x: np.ndarray,
+    y: np.ndarray,
+    p: np.ndarray,
+    config: RendererConfig,
+) -> np.ndarray:
+    x_out = x.astype(np.int64, copy=False)
+    y_out = y.astype(np.int64, copy=False)
+    polarity = p.astype(np.int64, copy=False)
+    frame_counts = np.zeros((2, config.output_height, config.output_width), dtype=np.uint32)
+    np.add.at(frame_counts, (polarity, y_out, x_out), np.uint32(1))
+    return np.log1p(frame_counts.astype(np.float32)).astype(np.float32, copy=False)
 
 
 def representation_cache_key(*, source: SourceIdentity, config: RendererConfig) -> str:
@@ -455,12 +502,14 @@ __all__ = [
     "DATASET_RELEASE",
     "DEFAULT_RENDERER_CONFIG",
     "POLARITY_ORDER",
+    "ProductionEventFrame",
     "ProductionRepresentations",
     "RendererConfig",
     "RepresentationError",
     "SourceIdentity",
     "cache_path",
     "read_representation_cache",
+    "render_production_event_frame",
     "render_production_representations",
     "representation_cache_key",
     "write_representation_cache",
