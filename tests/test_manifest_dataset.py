@@ -19,7 +19,6 @@ import torch
 import ebackbone_v3.n_imagenet_mini_dataset as dataset_module
 from ebackbone_v3.errors import DatasetError
 from ebackbone_v3.n_imagenet_mini_dataset import (
-    ManifestBackedNImageNetMiniDataset,
     open_dataset,
 )
 from ebackbone_v3.n_imagenet_mini_index import build_archive_index
@@ -148,16 +147,15 @@ def _dataset(
     baseline: str = "b1",
     cache: str = "off",
     cache_root: Path | None = None,
-    explicit_split: str | None = None,
     allow_final_test: bool = False,
-) -> ManifestBackedNImageNetMiniDataset:
-    return ManifestBackedNImageNetMiniDataset(
-        manifest_path=release.manifest_dir / MANIFEST_FILENAMES[split],
+) -> object:
+    return open_dataset(
+        manifest_dir=release.manifest_dir,
         dataset_root=release.dataset_root,
         baseline=baseline,  # type: ignore[arg-type]
         cache=cache,  # type: ignore[arg-type]
         cache_root=cache_root,
-        split=(split if explicit_split is None else explicit_split),  # type: ignore[arg-type]
+        split=split,  # type: ignore[arg-type]
         allow_final_test=allow_final_test,
     )
 
@@ -285,7 +283,6 @@ def test_resolves_explicit_train_validation_and_opted_in_synthetic_final_test_ro
         fixture_release,
         "test",
         baseline="b0",
-        explicit_split="test",
         allow_final_test=True,
     )[0]
 
@@ -309,17 +306,15 @@ def test_resolves_explicit_train_validation_and_opted_in_synthetic_final_test_ro
 def test_missing_invalid_and_ambiguous_split_arguments_fail_closed(
     fixture_release: FixtureRelease,
 ) -> None:
-    common = {
-        "manifest_path": fixture_release.manifest_dir / MANIFEST_FILENAMES["train"],
-        "dataset_root": fixture_release.dataset_root,
-        "baseline": "b0",
-        "cache": "off",
-    }
-    with pytest.raises(TypeError, match="split"):
-        ManifestBackedNImageNetMiniDataset(**common)  # type: ignore[call-arg]
     for invalid in (None, "", "val", False, True):
         with pytest.raises(DatasetError, match="explicitly set"):
-            ManifestBackedNImageNetMiniDataset(**common, split=invalid)  # type: ignore[arg-type]
+            open_dataset(
+                manifest_dir=fixture_release.manifest_dir,
+                dataset_root=fixture_release.dataset_root,
+                baseline="b0",
+                cache="off",
+                split=invalid,  # type: ignore[arg-type]
+            )
     for legacy in ({"train": False}, {"eval": True}):
         with pytest.raises(TypeError):
             open_dataset(
@@ -436,6 +431,55 @@ def test_runtime_membership_uses_only_selected_manifests_and_never_scans_archive
     train_ids = {row.sample_id for row in train._rows}  # noqa: SLF001
     validation_ids = {row.sample_id for row in validation._rows}  # noqa: SLF001
     assert not (train_ids & validation_ids)
+
+
+def test_open_dataset_preserves_train_and_validation_manifest_order_and_labels(
+    fixture_release: FixtureRelease,
+) -> None:
+    for split in ("train", "validation"):
+        dataset = open_dataset(
+            manifest_dir=fixture_release.manifest_dir,
+            split=split,  # type: ignore[arg-type]
+            dataset_root=fixture_release.dataset_root,
+            baseline="b0",
+        )
+        rows = _manifest_rows(fixture_release.manifest_dir, split)
+
+        assert dataset.sample_ids == tuple(str(row["sample_id"]) for row in rows)
+        first = dataset[0]
+        assert first.metadata.sample_id == rows[0]["sample_id"]
+        assert first.metadata.label == rows[0]["class_label"]
+        assert first.metadata.split == split
+        assert first.metadata.source_split == "train"
+
+
+def test_supervised_runtime_consumers_use_the_canonical_open_dataset_entrypoint() -> None:
+    runtime_sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in (
+            ROOT / "ebackbone_v3" / "b0_training.py",
+            ROOT / "ebackbone_v3" / "b0_production.py",
+            ROOT / "ebackbone_v3" / "cli.py",
+        )
+    }
+    for name in ("b0_training.py", "b0_production.py"):
+        source = runtime_sources[name]
+        assert "open_dataset(" in source
+        assert "ManifestBackedNImageNetMiniDataset" not in source
+        assert "manifest_path=" not in source
+        assert "MANIFEST_FILENAMES" not in source
+
+    adapter_source = (ROOT / "ebackbone_v3" / "n_imagenet_mini_dataset.py").read_text(
+        encoding="utf-8"
+    )
+    inspect_source = adapter_source.split("def inspect_sample(", maxsplit=1)[1].split(
+        "\ndef _resolve_project_split", maxsplit=1
+    )[0]
+    assert "open_dataset(" in inspect_source
+    assert "_ManifestBackedNImageNetMiniDataset(" not in inspect_source
+    assert '"--manifest",' not in runtime_sources["cli.py"]
+    assert '"--train-manifest",' not in runtime_sources["cli.py"]
+    assert '"--validation-manifest",' not in runtime_sources["cli.py"]
 
 
 def test_declared_archive_and_member_are_opened_without_extraction(
@@ -659,8 +703,8 @@ def test_inspect_sample_cli_reports_metadata_and_tensor_summaries_only(
             sys.executable,
             "main.py",
             "inspect-sample",
-            "--manifest",
-            str(fixture_release.manifest_dir / MANIFEST_FILENAMES["train"]),
+            "--manifest-dir",
+            str(fixture_release.manifest_dir),
             "--index",
             "0",
             "--baseline",

@@ -44,14 +44,15 @@ python main.py probe --config configs/probe.n_imagenet_mini.validation.first.jso
 python main.py build-splits --config configs/splits.n_imagenet_mini.json
 python main.py verify-splits --manifest-dir manifests/n_imagenet_mini/supervised-v1
 python main.py inspect-sample \
-  --manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
+  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --index 0 \
   --baseline b0 \
-  --cache off
+  --cache off \
+  --split train
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
 python main.py train-b0-debug \
-  --manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
+  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /tmp/ebackbone-v3-b0-tiny-overfit \
   --subset-size 16 --epochs 240 --batch-size 16 --learning-rate 0.01 --seed 20260715
@@ -118,7 +119,7 @@ fail-closed: inspecting `test.jsonl` requires both `--split test` and
 archive member.
 
 `train-b0-debug` is intentionally limited to the first real-data B0 validation: a
-deterministic 16--32 sample overfit run from `train.jsonl`. It materializes only
+deterministic 16--32 sample overfit run from explicit project `train`. It materializes only
 the selected production `[2,480,640]` float32 event frames in memory, performs
 the explicit tiny debug CNN plus linear-head cross-entropy training, and writes a
 checkpoint with strict reload/logit-equivalence verification. It does not
@@ -129,8 +130,7 @@ Production B0 training is a separate command and architecture:
 
 ```bash
 python main.py train-b0 \
-  --train-manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
-  --validation-manifest manifests/n_imagenet_mini/supervised-v1/validation.jsonl \
+  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /path/outside-or-inside-worktree/to/new-run \
   --epochs 100 --batch-size 64 --learning-rate 0.05 \

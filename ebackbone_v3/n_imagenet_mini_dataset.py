@@ -138,7 +138,7 @@ class ManifestSample:
     metadata: ManifestSampleMetadata
 
 
-class ManifestBackedNImageNetMiniDataset:
+class _ManifestBackedNImageNetMiniDataset:
     """Resolve one immutable project manifest without runtime split sampling.
 
     ``split`` is always required.  ``test.jsonl`` additionally requires
@@ -186,6 +186,12 @@ class ManifestBackedNImageNetMiniDataset:
 
     def __len__(self) -> int:
         return len(self._rows)
+
+    @property
+    def sample_ids(self) -> tuple[str, ...]:
+        """Return validated immutable-manifest identities in manifest order."""
+
+        return tuple(row.sample_id for row in self._rows)
 
     def __getitem__(self, index: int) -> ManifestSample:
         return self.get(index)
@@ -317,7 +323,7 @@ def open_dataset(
     cache: Literal["off", "on"] = "off",
     cache_root: str | Path | None = None,
     renderer_config: RendererConfig = DEFAULT_RENDERER_CONFIG,
-) -> ManifestBackedNImageNetMiniDataset:
+) -> _ManifestBackedNImageNetMiniDataset:
     """Open one fixed project role from its canonical immutable manifest.
 
     The role gate is evaluated before resolving the manifest directory or
@@ -327,7 +333,7 @@ def open_dataset(
 
     _validate_access_request(split=split, allow_final_test=allow_final_test)
     directory = Path(manifest_dir).expanduser().resolve()
-    return ManifestBackedNImageNetMiniDataset(
+    return _ManifestBackedNImageNetMiniDataset(
         manifest_path=directory / MANIFEST_FILENAMES[split],
         dataset_root=dataset_root,
         baseline=baseline,
@@ -341,7 +347,7 @@ def open_dataset(
 
 def inspect_sample(
     *,
-    manifest_path: str | Path,
+    manifest_dir: str | Path,
     index: int,
     baseline: Literal["b0", "b1"],
     cache: Literal["off", "on"],
@@ -352,8 +358,8 @@ def inspect_sample(
 ) -> dict[str, object]:
     """Return a JSON-ready inspection report without model construction or execution."""
 
-    dataset = ManifestBackedNImageNetMiniDataset(
-        manifest_path=manifest_path,
+    dataset = open_dataset(
+        manifest_dir=manifest_dir,
         dataset_root=dataset_root,
         baseline=baseline,
         cache=cache,
@@ -1067,7 +1073,6 @@ __all__ = [
     "ADAPTER_SCHEMA_VERSION",
     "DATASET_NAME",
     "DEFAULT_N_IMAGENET_MINI_DATASET_ROOT",
-    "ManifestBackedNImageNetMiniDataset",
     "ManifestRow",
     "ManifestSample",
     "ManifestSampleMetadata",

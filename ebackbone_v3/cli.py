@@ -57,9 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     inspect_sample_parser.add_argument(
-        "--manifest",
+        "--manifest-dir",
         required=True,
-        help="Path to immutable train.jsonl, validation.jsonl, or test.jsonl.",
+        help="Directory containing the immutable supervised manifest artifacts.",
     )
     inspect_sample_parser.add_argument(
         "--index",
@@ -121,14 +121,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Train production B0 on full immutable train/validation manifests.",
     )
     train_b0_parser.add_argument(
-        "--train-manifest",
+        "--manifest-dir",
         required=True,
-        help="Path to the immutable project train.jsonl manifest.",
-    )
-    train_b0_parser.add_argument(
-        "--validation-manifest",
-        required=True,
-        help="Path to the immutable project validation.jsonl manifest.",
+        help="Directory containing the immutable supervised manifest artifacts.",
     )
     train_b0_parser.add_argument(
         "--dataset-root",
@@ -168,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         "train-b0-debug",
         help="Run only the explicit 16--32 sample tiny-overfit debug diagnostic.",
     )
-    debug_b0_parser.add_argument("--manifest", required=True)
+    debug_b0_parser.add_argument("--manifest-dir", required=True)
     debug_b0_parser.add_argument(
         "--dataset-root", default="/mnt/hdd1/datasets/event/n_imagenet"
     )
@@ -227,7 +222,7 @@ def _handle_inspect_sample(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.n_imagenet_mini_dataset import inspect_sample
 
     return inspect_sample(
-        manifest_path=args.manifest,
+        manifest_dir=args.manifest_dir,
         index=args.index,
         baseline=args.baseline,
         cache=args.cache,
@@ -242,8 +237,7 @@ def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.b0_production import run_production_b0
 
     return run_production_b0(
-        train_manifest_path=args.train_manifest,
-        validation_manifest_path=args.validation_manifest,
+        manifest_dir=args.manifest_dir,
         dataset_root=args.dataset_root,
         output_dir=args.output_dir,
         epochs=args.epochs,
@@ -264,7 +258,7 @@ def _handle_train_b0_debug(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.b0_training import run_tiny_overfit
 
     return run_tiny_overfit(
-        manifest_path=args.manifest,
+        manifest_dir=args.manifest_dir,
         dataset_root=args.dataset_root,
         output_dir=args.output_dir,
         subset_size=args.subset_size,

@@ -23,49 +23,24 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from ebackbone_v3.errors import TrainingError
+from ebackbone_v3.b0_models import (
+    B0_CLASS_COUNT,
+    B0_INPUT_SHAPE,
+    DEBUG_MODEL_NAME,
+    TinyDebugB0FrameClassifier,
+    trainable_parameter_count,
+)
 from ebackbone_v3.n_imagenet_mini_dataset import (
     DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
-    ManifestBackedNImageNetMiniDataset,
+    ManifestSample,
+    open_dataset,
 )
 
 
 B0_TRAINING_SCHEMA_VERSION = 1
-B0_INPUT_SHAPE = (2, 480, 640)
-B0_CLASS_COUNT = 100
 TINY_SUBSET_MIN_SIZE = 16
 TINY_SUBSET_MAX_SIZE = 32
 TINY_SELECTION_NAMESPACE = b"ebackbone-v3/b0/tiny-overfit/v1\0"
-
-
-class B0FrameClassifier(nn.Module):
-    """Small random-initialized CNN for the fixed B0 production frame contract."""
-
-    def __init__(self, *, class_count: int = B0_CLASS_COUNT) -> None:
-        super().__init__()
-        if class_count <= 1:
-            raise ValueError("class_count must be greater than one")
-        self.class_count = class_count
-        self.encoder = nn.Sequential(
-            nn.Conv2d(2, 16, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
-        )
-        self.global_average_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = nn.Linear(64, class_count)
-
-    def forward(self, event_frame: Tensor) -> Tensor:
-        if event_frame.ndim != 4 or tuple(event_frame.shape[1:]) != B0_INPUT_SHAPE:
-            raise ValueError(
-                "B0 event_frame must have shape [B, 2, 480, 640]; "
-                f"got {tuple(event_frame.shape)}"
-            )
-        embedding = self.global_average_pool(self.encoder(event_frame)).flatten(start_dim=1)
-        return self.classifier(embedding)
 
 
 @dataclass(frozen=True)
@@ -155,7 +130,7 @@ def train_one_optimizer_step(
 def save_checkpoint(
     path: str | Path,
     *,
-    model: B0FrameClassifier,
+    model: TinyDebugB0FrameClassifier,
     optimizer: torch.optim.Optimizer,
     selection: TinySubsetSelection,
     epochs: Sequence[dict[str, Any]],
@@ -183,7 +158,7 @@ def save_checkpoint(
 def verify_checkpoint_round_trip(
     path: str | Path,
     *,
-    reference_model: B0FrameClassifier,
+    reference_model: TinyDebugB0FrameClassifier,
     reference_inputs: Tensor,
     device: torch.device,
 ) -> dict[str, Any]:
@@ -195,7 +170,7 @@ def verify_checkpoint_round_trip(
     model_config = checkpoint.get("model")
     if not isinstance(model_config, dict) or set(model_config) != {"class_count"}:
         raise TrainingError("checkpoint model configuration is invalid")
-    reloaded = B0FrameClassifier(class_count=int(model_config["class_count"])).to(device)
+    reloaded = TinyDebugB0FrameClassifier(class_count=int(model_config["class_count"])).to(device)
     incompatible = reloaded.load_state_dict(checkpoint["model_state_dict"], strict=True)
     reference_model.eval()
     reloaded.eval()
@@ -219,7 +194,7 @@ def verify_checkpoint_round_trip(
 
 def run_tiny_overfit(
     *,
-    manifest_path: str | Path,
+    manifest_dir: str | Path,
     dataset_root: str | Path = DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
     output_dir: str | Path,
     subset_size: int = 16,
@@ -243,7 +218,7 @@ def run_tiny_overfit(
     output.mkdir(parents=True, exist_ok=False)
     try:
         return _run_tiny_overfit_in_output_dir(
-            manifest_path=manifest_path,
+            manifest_dir=manifest_dir,
             dataset_root=dataset_root,
             output=output,
             subset_size=subset_size,
@@ -261,7 +236,7 @@ def run_tiny_overfit(
 
 def _run_tiny_overfit_in_output_dir(
     *,
-    manifest_path: str | Path,
+    manifest_dir: str | Path,
     dataset_root: str | Path,
     output: Path,
     subset_size: int,
@@ -273,21 +248,21 @@ def _run_tiny_overfit_in_output_dir(
 ) -> dict[str, Any]:
     _seed_everything(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = ManifestBackedNImageNetMiniDataset(
-        manifest_path=manifest_path,
+    dataset = open_dataset(
+        manifest_dir=manifest_dir,
         dataset_root=dataset_root,
         baseline="b0",
         cache="off",
         split="train",
     )
-    # The manifest adapter validates all rows before exposing this identity list.
-    sample_ids = tuple(row.sample_id for row in dataset._rows)  # noqa: SLF001
+    # The canonical API validates all rows before exposing this identity list.
+    sample_ids = dataset.sample_ids
     selection = select_tiny_subset(sample_ids, subset_size=subset_size, seed=seed)
     frames, labels, first_metadata = _materialize_tiny_subset(dataset, selection)
     loader = DataLoader(
         TensorDataset(frames, labels), batch_size=batch_size, shuffle=False, num_workers=0
     )
-    model = B0FrameClassifier().to(device)
+    model = TinyDebugB0FrameClassifier().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -353,14 +328,16 @@ def _run_tiny_overfit_in_output_dir(
             "representation": "production event frame",
             "shape": list(B0_INPUT_SHAPE),
             "dtype": "float32",
-            "manifest": str(Path(manifest_path).expanduser().resolve()),
+            "manifest": str(dataset.manifest_path),
             "project_split": "train",
             "representation_cache": "off; no cache entry was read or written",
         },
         "model": {
+            "name": DEBUG_MODEL_NAME,
+            "role": "explicit_debug_model_only",
             "architecture": "Conv2d(2,16,5,s2)-ReLU-Conv2d(16,32,3,s2)-ReLU-"
             "Conv2d(32,64,3,s2)-ReLU-Conv2d(64,64,3,s2)-ReLU-GAP-Linear(64,100)",
-            "trainable_parameter_count": _parameter_count(model),
+            "trainable_parameter_count": trainable_parameter_count(model),
             "class_count": B0_CLASS_COUNT,
         },
         "device": {
@@ -386,7 +363,7 @@ def _run_tiny_overfit_in_output_dir(
 
 
 def _materialize_tiny_subset(
-    dataset: ManifestBackedNImageNetMiniDataset,
+    dataset: Sequence[ManifestSample],
     selection: TinySubsetSelection,
 ) -> tuple[Tensor, Tensor, dict[str, Any]]:
     frames: list[Tensor] = []
@@ -456,14 +433,10 @@ def _require_new_or_empty_output_dir(path: Path) -> None:
         path.rmdir()
 
 
-def _parameter_count(model: nn.Module) -> int:
-    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
-
-
 __all__ = [
     "B0_CLASS_COUNT",
     "B0_INPUT_SHAPE",
-    "B0FrameClassifier",
+    "TinyDebugB0FrameClassifier",
     "TinySubsetSelection",
     "run_tiny_overfit",
     "save_checkpoint",
