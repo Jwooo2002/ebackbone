@@ -15,3 +15,7 @@ class SmokeError(EBackboneV3Error):
 
 class SplitError(EBackboneV3Error):
     """Raised when supervised split manifests cannot be built or verified."""
+
+
+class DatasetError(EBackboneV3Error):
+    """Raised when a manifest-backed raw-event sample cannot be resolved safely."""

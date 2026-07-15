@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -160,6 +161,21 @@ def test_cache_round_trip_is_deterministic_and_parameter_changes_invalidate(tmp_
             expected_source=source,
             expected_config=changed,
         )
+
+
+def test_cache_key_keeps_project_split_provenance_separate() -> None:
+    fields = _fields()
+    source = _source(fields)
+    project_train = replace(source, project_split="train")
+    project_validation = replace(source, project_split="validation")
+
+    assert representation_cache_key(
+        source=project_train,
+        config=RendererConfig(),
+    ) != representation_cache_key(
+        source=project_validation,
+        config=RendererConfig(),
+    )
 
 
 def test_cache_rejects_forged_shapes_and_manifest_contract(tmp_path: Path) -> None:

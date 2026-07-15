@@ -25,10 +25,11 @@ def test_root_help_lists_commands() -> None:
     result = _run_cli("--help")
     assert result.returncode == 0
     assert result.stderr == ""
-    assert "{probe,build-splits,verify-splits,smoke}" in result.stdout
+    assert "{probe,build-splits,verify-splits,inspect-sample,smoke}" in result.stdout
     assert "Inspect one real raw-event sample" in result.stdout
     assert "Build immutable supervised" in result.stdout
     assert "Verify immutable split manifests" in result.stdout
+    assert "Resolve one manifest-backed raw-event sample" in result.stdout
     assert "synthetic CPU-only" in result.stdout
 
 
@@ -38,6 +39,7 @@ def test_root_help_lists_commands() -> None:
         ("probe", "--config"),
         ("build-splits", "--config"),
         ("verify-splits", "--manifest-dir"),
+        ("inspect-sample", "--manifest"),
         ("smoke", "--baseline {b0,b1}"),
     ],
 )

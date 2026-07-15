@@ -43,6 +43,11 @@ python main.py probe --config configs/probe.n_imagenet_mini.train.part1.json
 python main.py probe --config configs/probe.n_imagenet_mini.validation.first.json
 python main.py build-splits --config configs/splits.n_imagenet_mini.json
 python main.py verify-splits --manifest-dir manifests/n_imagenet_mini/supervised-v1
+python main.py inspect-sample \
+  --manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
+  --index 0 \
+  --baseline b0 \
+  --cache off
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
 ```
@@ -80,6 +85,26 @@ It writes canonical `train.jsonl`, `validation.jsonl`, `test.jsonl`,
 left byte-for-byte untouched; changed inputs, seed, quota, or bytes are a hard
 conflict. The stale bundled 1,000-class path lists are checksummed as
 non-authoritative provenance inputs and never define membership.
+
+`inspect-sample` is the read-only manifest-backed adapter inspection command.
+It uses a row from an immutable manifest; it never resamples a split or extracts
+the full dataset. The default dataset root is
+`/mnt/hdd1/datasets/event/n_imagenet`, matching the checked-in configurations;
+use `--dataset-root <path>` to point at another copy of the same release. The
+command resolves the declared ZIP/TAR/NPZ member path, validates the row identity
+and exact raw-NPZ payload hash, decodes the production `x`, `y`, `t`, `p`
+contract, and renders the D012 production representations. It is CPU-only and
+reports metadata plus tensor shapes, dtypes, and ranges only: it does not create
+or run a model, batch samples, augment data, or start training.
+
+With `--baseline b0`, inspection returns the frame input only. With
+`--baseline b1`, it returns the frame, voxel grid, and time surface from the
+same verified raw-event fingerprint and temporal interval. `--cache off` reads
+and writes no cache. `--cache on` requires an explicit `--cache-root <path>`;
+cache acceptance is provenance-validated against the production renderer and
+contract versions, project/source split identity, the exact raw payload hash,
+and the raw-event identity, so a stale entry is never silently reused. Project-final-test rows are not loaded by
+default: inspecting `test.jsonl` requires an explicit `--split test` argument.
 
 ## Development setup
 

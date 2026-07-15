@@ -50,6 +50,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_splits_parser.set_defaults(handler=_handle_verify_splits)
 
+    inspect_sample_parser = subparsers.add_parser(
+        "inspect-sample",
+        help=(
+            "Resolve one manifest-backed raw-event sample and report CPU tensor metadata only."
+        ),
+    )
+    inspect_sample_parser.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to immutable train.jsonl, validation.jsonl, or test.jsonl.",
+    )
+    inspect_sample_parser.add_argument(
+        "--index",
+        required=True,
+        type=int,
+        help="Zero-based row index in the selected immutable manifest.",
+    )
+    inspect_sample_parser.add_argument(
+        "--baseline",
+        required=True,
+        choices=("b0", "b1"),
+        help="Return the B0 frame only or the aligned B1 representation bundle.",
+    )
+    inspect_sample_parser.add_argument(
+        "--cache",
+        required=True,
+        choices=("off", "on"),
+        help="Disable caching or validate/use one explicit representation-cache entry.",
+    )
+    inspect_sample_parser.add_argument(
+        "--dataset-root",
+        default="/mnt/hdd1/datasets/event/n_imagenet",
+        help=(
+            "N-ImageNet root containing mini_zenodo/archives; defaults to the checked-in "
+            "local configuration."
+        ),
+    )
+    inspect_sample_parser.add_argument(
+        "--cache-root",
+        help="Required with --cache on; destination for on-demand representation entries.",
+    )
+    inspect_sample_parser.add_argument(
+        "--split",
+        choices=("train", "validation", "test"),
+        help="Optional manifest role; --split test is required before final-test access.",
+    )
+    inspect_sample_parser.set_defaults(handler=_handle_inspect_sample)
+
     smoke_parser = subparsers.add_parser(
         "smoke",
         help="Run a synthetic CPU-only forward, cross-entropy, and backward check.",
@@ -102,6 +150,20 @@ def _handle_verify_splits(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.splits import verify_splits
 
     return verify_splits(args.manifest_dir)
+
+
+def _handle_inspect_sample(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.n_imagenet_mini_dataset import inspect_sample
+
+    return inspect_sample(
+        manifest_path=args.manifest,
+        index=args.index,
+        baseline=args.baseline,
+        cache=args.cache,
+        dataset_root=args.dataset_root,
+        cache_root=args.cache_root,
+        split=args.split,
+    )
 
 
 __all__ = ["build_parser", "entrypoint", "main"]

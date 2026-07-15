@@ -74,6 +74,41 @@ destination verifies and leaves every file untouched. Different parameters,
 inputs, incomplete artifacts, or altered bytes are refused rather than
 overwritten.
 
+### Runtime manifest-backed adapter
+
+The read-only runtime adapter consumes one row from one of these immutable JSONL
+files. It does not resample membership, derive a split at runtime, or use the
+bundled stale path lists. The selected row remains the authority for both the
+project `split` and the dataset-native `source_split`; these values are returned
+separately with the sample metadata.
+
+The adapter resolves `source_archive` and `source_members` relative to the
+configured N-ImageNet root without extracting the full release. A source-train
+row is read through its declared ZIP member and nested TAR.GZ member; a
+source-validation row is read from its declared ZIP member. Archive handles are
+scoped to one resolution operation rather than shared globally, so the adapter
+does not retain an open ZIP or TAR handle between accesses.
+
+Before decoding, the adapter validates the manifest schema and row semantics,
+including the stable sample ID, synset, class index and label, project/source
+split relationship, archive/member paths, and complete source locator. It then
+checks the resolved raw NPZ payload's byte length and SHA-256 against
+`raw_content_size_bytes` and `raw_content_sha256`. This raw payload hash is the
+digest of the exact stored NPZ bytes after archive decompression, not the
+decoded-event fingerprint.
+
+The adapter is CPU-only. It decodes the exact `event_data` NPZ contract and
+validates its one-dimensional `x:uint16`, `y:uint16`, `t:uint16`, and `p:bool`
+arrays before representation rendering. It does not initialize CUDA, construct
+or run a model, batch samples, augment samples, or execute a training loop.
+
+Project-final-test access is intentionally gated. Train and internal-validation
+rows may be selected from their canonical manifest filenames without a separate
+split flag, but a `test.jsonl` row is rejected unless the caller explicitly
+requests project `test` (the CLI spelling is `--split test`). A dataset-native
+source split remains `validation` for those rows; `test` is only the explicit
+project role.
+
 ## Raw event contract
 
 Expected raw event fields:
@@ -108,6 +143,36 @@ The following parameters must be recorded:
 For N-ImageNet mini B0/B1, D012 resolves these representation parameters.
 Architecture and augmentation parameters remain separate decisions and must not
 be inferred from the renderer.
+
+### Adapter output and optional cache
+
+The adapter renders the existing D012 production contract; it does not redefine
+frame, voxel-grid, or time-surface semantics. Each returned item includes
+structured metadata with the stable sample ID, class label/index and synset,
+project split, source split, exact raw payload hash, canonical raw-event
+fingerprint, temporal start/end and closure, event count, and renderer
+fingerprint.
+
+For B0 access, the public output contains only the event-frame tensor and this
+metadata. For B1 access, it contains the event frame, voxel grid, and time
+surface. All B1 tensors are bound to the same verified raw-event fingerprint and
+the same closed observed-support interval; a matching shape alone is not
+accepted as alignment evidence.
+
+Caching is optional and on-demand. Cache-off performs no cache read or write.
+Cache-on requires an explicit cache root; there is no hidden cache location and
+the adapter never precomputes the release. A cache candidate is accepted only
+after its provenance matches the production renderer fingerprint and contract
+version, project/source split identity, the exact manifest raw-payload SHA-256,
+and the validated raw-event identity and interval. A changed renderer/contract
+version, split role, or raw payload hash makes the entry stale and prevents its
+reuse.
+
+`python main.py inspect-sample` exposes this adapter for one-row inspection.
+The command reports metadata and tensor shape/dtype/range summaries only; it
+does not invoke a model. Its default dataset root is
+`/mnt/hdd1/datasets/event/n_imagenet`, and `--dataset-root` overrides that root
+for another local copy of the release.
 
 ## B0 protocol
 

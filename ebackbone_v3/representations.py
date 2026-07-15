@@ -19,7 +19,11 @@ import numpy as np
 
 CONTRACT_NAME = "n_imagenet_mini_b0_b1_representations_v1"
 DATASET_RELEASE = "N-ImageNet mini 100-class original train/validation release"
-CACHE_SCHEMA_VERSION = 1
+# Schema 3 binds optional exact stored-NPZ payload and project-split provenance
+# into SourceIdentity. This deliberately invalidates older entries, whose
+# provenance could not distinguish alternate NPZ encodings of otherwise equal
+# x/y/t/p arrays or a changed project role for the same source record.
+CACHE_SCHEMA_VERSION = 3
 SOURCE_HEIGHT = 480
 SOURCE_WIDTH = 640
 POLARITY_ORDER = ("negative", "positive")
@@ -84,6 +88,8 @@ class SourceIdentity:
     temporal_end: int
     interval_closure: str
     event_count: int
+    raw_content_sha256: str | None = None
+    project_split: str | None = None
 
     def __post_init__(self) -> None:
         if not self.sample_id:
@@ -100,6 +106,22 @@ class SourceIdentity:
             raise RepresentationError("production N-ImageNet intervals use closed endpoints []")
         if self.event_count <= 0:
             raise RepresentationError("production rendering requires at least one event")
+        if self.raw_content_sha256 is not None:
+            if (
+                len(self.raw_content_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in self.raw_content_sha256)
+            ):
+                raise RepresentationError(
+                    "raw_content_sha256 must be a lowercase SHA-256 hex digest when supplied"
+                )
+        if self.project_split is not None and self.project_split not in {
+            "train",
+            "validation",
+            "test",
+        }:
+            raise RepresentationError(
+                "project_split must be train, validation, or test when supplied"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -324,7 +346,7 @@ def _validated_fields(
         raise RepresentationError("timestamps must be nondecreasing")
     if int(t[0]) != source.temporal_start or int(t[-1]) != source.temporal_end:
         raise RepresentationError("source interval must equal observed timestamp support")
-    observed_subset_id = _compute_event_subset_id(fields)
+    observed_subset_id = compute_event_fingerprint(fields)
     if observed_subset_id != source.event_subset_id:
         raise RepresentationError("source event_subset_id does not match the supplied raw fields")
     return x, y, t, p  # type: ignore[return-value]
@@ -393,7 +415,7 @@ def _raw_contract() -> dict[str, object]:
     }
 
 
-def _compute_event_subset_id(fields: Mapping[str, np.ndarray]) -> str:
+def compute_event_fingerprint(fields: Mapping[str, np.ndarray]) -> str:
     """Match ``probe.compute_event_subset_id`` without a PyTorch conversion.
 
     The production raw dtypes are fixed, so their canonical PyTorch dtype names
@@ -429,6 +451,7 @@ def _canonical_json(value: object) -> bytes:
 __all__ = [
     "CACHE_SCHEMA_VERSION",
     "CONTRACT_NAME",
+    "compute_event_fingerprint",
     "DATASET_RELEASE",
     "DEFAULT_RENDERER_CONFIG",
     "POLARITY_ORDER",
