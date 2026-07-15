@@ -50,7 +50,7 @@ python main.py inspect-sample \
   --cache off
 python main.py smoke --baseline b0
 python main.py smoke --baseline b1
-python main.py train-b0 \
+python main.py train-b0-debug \
   --manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
   --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
   --output-dir /tmp/ebackbone-v3-b0-tiny-overfit \
@@ -83,6 +83,9 @@ training source, keeps the remaining official-training samples as project
 `train`, and reserves every official-validation sample as project `test`.
 Source and project roles remain separate in the immutable manifests: project
 test rows retain `source_split: "validation"` and use `split: "test"`.
+The provenance makes the class-stratified rank independently reproducible as
+`UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || NUL ||
+UTF8(source_stable_sample_id)`.
 
 `build-splits` indexes archive members directly without decoding event tensors.
 It writes canonical `train.jsonl`, `validation.jsonl`, `test.jsonl`,
@@ -111,13 +114,37 @@ contract versions, project/source split identity, the exact raw payload hash,
 and the raw-event identity, so a stale entry is never silently reused. Project-final-test rows are not loaded by
 default: inspecting `test.jsonl` requires an explicit `--split test` argument.
 
-`train-b0` is intentionally limited to the first real-data B0 validation: a
+`train-b0-debug` is intentionally limited to the first real-data B0 validation: a
 deterministic 16--32 sample overfit run from `train.jsonl`. It materializes only
 the selected production `[2,480,640]` float32 event frames in memory, performs
-random-initialized CNN plus linear-head cross-entropy training, and writes a
+the explicit tiny debug CNN plus linear-head cross-entropy training, and writes a
 checkpoint with strict reload/logit-equivalence verification. It does not
 provide a full-dataset mode, access validation/test rows, augment inputs, or
 read/write the representation cache.
+
+Production B0 training is a separate command and architecture:
+
+```bash
+python main.py train-b0 \
+  --train-manifest manifests/n_imagenet_mini/supervised-v1/train.jsonl \
+  --validation-manifest manifests/n_imagenet_mini/supervised-v1/validation.jsonl \
+  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
+  --output-dir /path/outside-or-inside-worktree/to/new-run \
+  --epochs 100 --batch-size 64 --learning-rate 0.05 \
+  --momentum 0.9 --weight-decay 0.0001 \
+  --seed 20260715 --num-workers 28 --prefetch-factor 2
+```
+
+The D014 production model is a random-initialized ResNet-18 adapted to the fixed
+two-channel native-resolution event frame. It uses adaptive global average
+pooling, exactly one `Linear(512,100)` classifier, and cross-entropy. The command
+uses only project train samples for optimization and the complete project
+validation manifest for best-checkpoint selection. Project test manifests are
+not accepted. It writes atomic best/last checkpoints, append-only JSONL batch
+and epoch logs, a JSON report, top-1/top-5 metrics, throughput, peak GPU memory,
+and strict reload evidence. Resume requires `checkpoint_last.pt` and an exact
+match of model, optimizer, scheduler, seed, manifest hashes, renderer provenance,
+and loader configuration.
 
 ## Development setup
 

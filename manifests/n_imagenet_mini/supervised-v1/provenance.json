@@ -1,5 +1,5 @@
 {
-  "canonical_configuration_sha256": "cac2024565f0fe0db35232e37d51b8d66920e1ad2e2adbaf94e4b4ef5e7730df",
+  "canonical_configuration_sha256": "4d3e839b16032148b21ed2bba97c7006c723fee8a826bdcbb114cb8fe43fd7f5",
   "class_to_index": {
     "n01440764": 0,
     "n01443537": 1,
@@ -111,7 +111,7 @@
     "semantic_equivalence_limit": "differently encoded NPZ containers with equivalent decoded arrays are not detected",
     "unique_raw_content_hashes": 134395
   },
-  "generation_fingerprint_sha256": "850255418ac660764ce6e152f262a0f4f5dfdab1c63fdf7a1972b01061043ebe",
+  "generation_fingerprint_sha256": "d276aaffaea83f244cbbe560c90e6639cea4bfbadc75fa17af99ee98be996e54",
   "generation_parameters": {
     "absolute_dataset_root_in_output": false,
     "class_mapping": "lexicographically sorted WordNet synset ID to zero-based index",
@@ -126,7 +126,7 @@
     "seed": 20260715,
     "selection_algorithm": "sha256-rank-per-class-v1",
     "selection_domain_utf8": "ebackbone-v3/n-imagenet-mini/internal-validation/v1",
-    "selection_rank": "SHA256(domain || ASCII(decimal_seed) || NUL || UTF8(source_stable_sample_id)); sort by (digest, sample_id) within class",
+    "selection_rank": "SHA256(UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || NUL || UTF8(source_stable_sample_id)); sort by (digest, sample_id) within class",
     "source_to_project_mapping": {
       "official_train": [
         "train",

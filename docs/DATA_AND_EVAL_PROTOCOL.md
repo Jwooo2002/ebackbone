@@ -32,6 +32,11 @@ validation source is not renamed at the storage/provider layer: each final-test
 row preserves `source_split: "validation"` and records the project role
 separately as `split: "test"`.
 
+The rank bytes are independently reproducible from provenance:
+`UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || NUL ||
+UTF8(source_stable_sample_id)`. The stored domain string deliberately excludes
+both separator bytes; provenance names both separators explicitly.
+
 All 100 classes occur in every project split. Sample IDs and source locators are
 globally unique, and the three project sample-ID sets are pairwise disjoint.
 The stable sample ID is based on source identity (`source_split/class/file`), so
@@ -182,6 +187,22 @@ Event frame generated from the raw event sample.
 
 The production tensor is the D012 float32 `[2,480,640]` negative/positive
 `log1p` count frame.
+
+### Production training and checkpoint selection
+
+D014 uses the complete immutable project `train.jsonl` for optimizer updates
+and the complete immutable project `validation.jsonl` only for checkpoint
+selection. The selection rule is highest validation top-1 accuracy, breaking a
+tie with lower validation cross-entropy and then retaining the earlier epoch.
+The production command has no project-test argument and rejects a test manifest
+in either input position before constructing a dataset or opening a sample.
+
+Every checkpoint records the production model identity and random initialization,
+optimizer and scheduler configurations and states, deterministic seed, exact
+train/validation manifest hashes and counts, renderer contract/config/fingerprint,
+epoch history, and selection state. `checkpoint_last.pt` is the only resume
+source; an exact run-configuration match is required. `checkpoint_best.pt` is
+selection output, not a resume source.
 
 ### Test input
 

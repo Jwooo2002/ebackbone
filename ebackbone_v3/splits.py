@@ -495,7 +495,8 @@ def _generation_parameters(seed: int, quota: int) -> dict[str, object]:
         "internal_validation_per_class": quota,
         "selection_algorithm": SELECTION_ALGORITHM,
         "selection_rank": (
-            "SHA256(domain || ASCII(decimal_seed) || NUL || UTF8(source_stable_sample_id)); "
+            "SHA256(UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || "
+            "NUL || UTF8(source_stable_sample_id)); "
             "sort by (digest, sample_id) within class"
         ),
         "selection_domain_utf8": SELECTION_DOMAIN[:-1].decode("utf-8"),

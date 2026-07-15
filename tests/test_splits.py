@@ -207,6 +207,16 @@ def test_seed_and_quota_change_provenance_and_cannot_overwrite(
         )
     assert _artifact_bytes(target) == before
 
+    with pytest.raises(SplitError, match="refusing to regenerate or overwrite"):
+        publish_split_manifests(
+            index,
+            manifest_dir=target,
+            seed=20260715,
+            internal_validation_per_class=2,
+            enforce_official_release=False,
+        )
+    assert _artifact_bytes(target) == before
+
     seed_dir = tmp_path / "different-seed"
     changed_seed = publish_split_manifests(
         index,
@@ -233,6 +243,57 @@ def test_seed_and_quota_change_provenance_and_cannot_overwrite(
         "train": 100,
         "validation": 200,
         "test": 100,
+    }
+
+
+def test_provenance_alone_reproduces_internal_validation_membership(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    directory = tmp_path / "manifests"
+    publish_split_manifests(
+        index,
+        manifest_dir=directory,
+        seed=20260715,
+        internal_validation_per_class=1,
+        enforce_official_release=False,
+    )
+
+    provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
+    generation = provenance["generation_parameters"]
+    assert generation["selection_rank"] == (
+        "SHA256(UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || "
+        "NUL || UTF8(source_stable_sample_id)); sort by (digest, sample_id) within class"
+    )
+    domain = generation["selection_domain_utf8"].encode("utf-8")
+    seed = str(generation["seed"]).encode("ascii")
+    quota = generation["internal_validation_per_class"]
+    train_rows = _rows(directory, "train")
+    validation_rows = _rows(directory, "validation")
+    source_train_rows = train_rows + validation_rows
+    expected_validation_ids: set[str] = set()
+    for class_id in sorted(provenance["class_to_index"]):
+        class_ids = [
+            str(row["sample_id"])
+            for row in source_train_rows
+            if row["class_id"] == class_id
+        ]
+        ranked = sorted(
+            class_ids,
+            key=lambda sample_id: (
+                hashlib.sha256(
+                    domain
+                    + b"\0"
+                    + seed
+                    + b"\0"
+                    + sample_id.encode("utf-8")
+                ).digest(),
+                sample_id,
+            ),
+        )
+        expected_validation_ids.update(ranked[:quota])
+    assert expected_validation_ids == {
+        str(row["sample_id"]) for row in validation_rows
     }
 
 
