@@ -23,6 +23,7 @@ from ebackbone_v3.contracts import RawEventRecord
 from ebackbone_v3.errors import DatasetError
 from ebackbone_v3.n_imagenet_mini_index import (
     ARCHIVE_DIRECTORY,
+    BUNDLED_LIST_NAMES,
     CLASS_ID_PATTERN,
     EXPECTED_CLASS_COUNT,
     TRAIN_ARCHIVE_NAMES,
@@ -45,10 +46,12 @@ from ebackbone_v3.representations import (
 )
 from ebackbone_v3.splits import (
     CHECKSUM_FILENAME,
+    DATASET_RELEASE as SPLIT_DATASET_RELEASE,
     EXPECTED_ARTIFACT_FILENAMES,
     MANIFEST_FILENAMES,
     MANIFEST_SCHEMA_VERSION,
     PROTOCOL_ID,
+    PROVENANCE_SCHEMA_VERSION,
     PROVENANCE_FILENAME,
 )
 
@@ -58,6 +61,7 @@ DATASET_NAME = "N-ImageNet mini 100-class"
 DEFAULT_N_IMAGENET_MINI_DATASET_ROOT = Path("/mnt/hdd1/datasets/event/n_imagenet")
 PROJECT_SPLITS = ("train", "validation", "test")
 SOURCE_SPLITS = ("train", "validation")
+ProjectSplit = Literal["train", "validation", "test"]
 _ROW_KEYS = frozenset(
     {
         "schema_version",
@@ -137,9 +141,9 @@ class ManifestSample:
 class ManifestBackedNImageNetMiniDataset:
     """Resolve one immutable project manifest without runtime split sampling.
 
-    ``split`` may be omitted only for canonical ``train.jsonl`` and
-    ``validation.jsonl`` paths.  ``test.jsonl`` requires ``split="test"`` so a
-    final-test raw sample cannot be accessed accidentally.
+    ``split`` is always required.  ``test.jsonl`` additionally requires
+    ``allow_final_test=True`` so a final-test archive member cannot be opened by
+    a role typo, a filename inference, or an evaluation-mode boolean.
     """
 
     def __init__(
@@ -150,9 +154,11 @@ class ManifestBackedNImageNetMiniDataset:
         baseline: Literal["b0", "b1"] = "b1",
         cache: Literal["off", "on"] = "off",
         cache_root: str | Path | None = None,
-        split: Literal["train", "validation", "test"] | None = None,
+        split: ProjectSplit,
+        allow_final_test: bool = False,
         renderer_config: RendererConfig = DEFAULT_RENDERER_CONFIG,
     ) -> None:
+        _validate_access_request(split=split, allow_final_test=allow_final_test)
         if baseline not in {"b0", "b1"}:
             raise DatasetError("baseline must be 'b0' or 'b1'")
         if cache not in {"off", "on"}:
@@ -301,6 +307,38 @@ def renderer_provenance_fingerprint(
     return hashlib.sha256(_canonical_json(payload)).hexdigest()
 
 
+def open_dataset(
+    *,
+    manifest_dir: str | Path,
+    split: ProjectSplit,
+    allow_final_test: bool = False,
+    dataset_root: str | Path = DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
+    baseline: Literal["b0", "b1"] = "b1",
+    cache: Literal["off", "on"] = "off",
+    cache_root: str | Path | None = None,
+    renderer_config: RendererConfig = DEFAULT_RENDERER_CONFIG,
+) -> ManifestBackedNImageNetMiniDataset:
+    """Open one fixed project role from its canonical immutable manifest.
+
+    The role gate is evaluated before resolving the manifest directory or
+    touching the dataset root.  Runtime callers cannot supply an archive path,
+    member glob, predicate, sampler, or alternate manifest filename.
+    """
+
+    _validate_access_request(split=split, allow_final_test=allow_final_test)
+    directory = Path(manifest_dir).expanduser().resolve()
+    return ManifestBackedNImageNetMiniDataset(
+        manifest_path=directory / MANIFEST_FILENAMES[split],
+        dataset_root=dataset_root,
+        baseline=baseline,
+        cache=cache,
+        cache_root=cache_root,
+        split=split,
+        allow_final_test=allow_final_test,
+        renderer_config=renderer_config,
+    )
+
+
 def inspect_sample(
     *,
     manifest_path: str | Path,
@@ -309,7 +347,8 @@ def inspect_sample(
     cache: Literal["off", "on"],
     dataset_root: str | Path = DEFAULT_N_IMAGENET_MINI_DATASET_ROOT,
     cache_root: str | Path | None = None,
-    split: Literal["train", "validation", "test"] | None = None,
+    split: ProjectSplit,
+    allow_final_test: bool = False,
 ) -> dict[str, object]:
     """Return a JSON-ready inspection report without model construction or execution."""
 
@@ -320,6 +359,7 @@ def inspect_sample(
         cache=cache,
         cache_root=cache_root,
         split=split,
+        allow_final_test=allow_final_test,
     )
     sample = dataset[index]
     return {
@@ -344,7 +384,7 @@ def inspect_sample(
 
 def _resolve_project_split(
     manifest_path: Path,
-    requested_split: Literal["train", "validation", "test"] | None,
+    requested_split: ProjectSplit,
 ) -> str:
     by_filename = {filename: split for split, filename in MANIFEST_FILENAMES.items()}
     inferred_split = by_filename.get(manifest_path.name)
@@ -353,15 +393,6 @@ def _resolve_project_split(
             "manifest_path must name one immutable canonical manifest: "
             + ", ".join(sorted(by_filename))
         )
-    if requested_split is None:
-        if inferred_split == "test":
-            raise DatasetError(
-                "final-test access requires an explicit split='test' argument; "
-                "no test sample was loaded"
-            )
-        return inferred_split
-    if requested_split not in PROJECT_SPLITS:
-        raise DatasetError("split must be train, validation, or test")
     if requested_split != inferred_split:
         raise DatasetError(
             f"explicit split {requested_split!r} does not match manifest filename {manifest_path.name!r}"
@@ -369,18 +400,35 @@ def _resolve_project_split(
     return requested_split
 
 
+def _validate_access_request(*, split: object, allow_final_test: object) -> None:
+    if not isinstance(split, str) or split not in PROJECT_SPLITS:
+        raise DatasetError("split must be explicitly set to train, validation, or test")
+    if not isinstance(allow_final_test, bool):
+        raise DatasetError("allow_final_test must be an explicit boolean")
+    if split == "test" and allow_final_test is not True:
+        raise DatasetError(
+            "final-test access requires split='test' and allow_final_test=True; "
+            "no test manifest or archive member was read"
+        )
+    if split != "test" and allow_final_test:
+        raise DatasetError("allow_final_test=True is valid only with split='test'")
+
+
 def _load_immutable_manifest(manifest_path: Path, *, expected_split: str) -> tuple[ManifestRow, ...]:
     if not manifest_path.is_file():
         raise DatasetError(f"manifest does not exist or is not a regular file: {manifest_path}")
     directory = manifest_path.parent
     try:
-        names = {path.name for path in directory.iterdir()}
+        artifacts = tuple(directory.iterdir())
     except OSError as exc:
         raise DatasetError(f"could not inspect manifest directory {directory}: {exc}") from exc
+    names = {path.name for path in artifacts}
     if names != EXPECTED_ARTIFACT_FILENAMES:
         raise DatasetError(
             "manifest directory must contain exactly the immutable supervised artifact set"
         )
+    if any(path.is_symlink() or not path.is_file() for path in artifacts):
+        raise DatasetError("immutable manifest artifacts must be regular non-symlink files")
     if manifest_path.name != MANIFEST_FILENAMES[expected_split]:
         raise DatasetError("manifest filename does not match the selected project split")
 
@@ -389,6 +437,8 @@ def _load_immutable_manifest(manifest_path: Path, *, expected_split: str) -> tup
     provenance_bytes = _read_bytes(provenance_path, "provenance")
     checksum_bytes = _read_bytes(directory / CHECKSUM_FILENAME, "checksum file")
     checksums = _parse_checksum_file(checksum_bytes)
+    if _canonical_checksum_file(checksums) != checksum_bytes:
+        raise DatasetError("SHA256SUMS is not canonical deterministic checksum metadata")
     expected_checksum_names = set(EXPECTED_ARTIFACT_FILENAMES) - {CHECKSUM_FILENAME}
     if set(checksums) != expected_checksum_names:
         raise DatasetError("SHA256SUMS does not describe exactly the immutable artifact files")
@@ -400,11 +450,9 @@ def _load_immutable_manifest(manifest_path: Path, *, expected_split: str) -> tup
     provenance = _decode_json_object(provenance_bytes, description="provenance.json")
     if _canonical_pretty_json(provenance) != provenance_bytes:
         raise DatasetError("provenance.json is not canonical deterministic JSON")
-    if provenance.get("protocol_id") != PROTOCOL_ID:
-        raise DatasetError("provenance protocol_id does not match the immutable supervised protocol")
-    manifest_files = provenance.get("manifest_files")
-    if not isinstance(manifest_files, dict) or set(manifest_files) != set(PROJECT_SPLITS):
-        raise DatasetError("provenance manifest_files does not describe train, validation, and test")
+    _validate_runtime_provenance(provenance)
+    manifest_files = provenance["manifest_files"]
+    assert isinstance(manifest_files, dict)
     selected_metadata = manifest_files.get(expected_split)
     if not isinstance(selected_metadata, dict):
         raise DatasetError("provenance metadata for the selected manifest is invalid")
@@ -453,7 +501,159 @@ def _load_immutable_manifest(manifest_path: Path, *, expected_split: str) -> tup
         rows.append(row)
     if selected_metadata.get("sample_count") != len(rows):
         raise DatasetError("provenance manifest sample count does not match selected manifest")
+    project_counts = provenance["project_counts"]
+    assert isinstance(project_counts, dict)
+    if project_counts[expected_split] != len(rows):
+        raise DatasetError("provenance project count does not match selected manifest")
     return tuple(rows)
+
+
+def _validate_runtime_provenance(provenance: Mapping[str, Any]) -> None:
+    expected_keys = {
+        "schema_version",
+        "protocol_id",
+        "dataset_release",
+        "generation_parameters",
+        "canonical_configuration_sha256",
+        "generation_fingerprint_sha256",
+        "source_catalog_sha256",
+        "class_to_index",
+        "source_files",
+        "source_counts",
+        "source_per_class",
+        "project_counts",
+        "project_per_class",
+        "identity_audit",
+        "duplicate_audit",
+        "release_contract",
+        "manifest_files",
+    }
+    if set(provenance) != expected_keys:
+        raise DatasetError("provenance keys do not match the immutable supervised schema")
+    if provenance["schema_version"] != PROVENANCE_SCHEMA_VERSION:
+        raise DatasetError("provenance schema_version mismatch")
+    if provenance["protocol_id"] != PROTOCOL_ID:
+        raise DatasetError("provenance protocol_id does not match the immutable supervised protocol")
+    if provenance["dataset_release"] != SPLIT_DATASET_RELEASE:
+        raise DatasetError("provenance dataset release mismatch")
+    for field in (
+        "canonical_configuration_sha256",
+        "generation_fingerprint_sha256",
+        "source_catalog_sha256",
+    ):
+        if not _is_sha256(provenance[field]):
+            raise DatasetError(f"provenance {field} is not a lowercase SHA-256 digest")
+
+    generation = provenance["generation_parameters"]
+    if not isinstance(generation, dict):
+        raise DatasetError("provenance generation_parameters must be an object")
+    if generation.get("source_to_project_mapping") != {
+        "official_train": ["train", "validation"],
+        "official_validation": ["test"],
+    }:
+        raise DatasetError("provenance source-to-project role mapping mismatch")
+    expected_config_hash = _sha256_bytes(_canonical_json(generation))
+    if provenance["canonical_configuration_sha256"] != expected_config_hash:
+        raise DatasetError("provenance canonical configuration SHA-256 mismatch")
+    fingerprint_payload = {
+        "schema_version": PROVENANCE_SCHEMA_VERSION,
+        "protocol_id": PROTOCOL_ID,
+        "dataset_release": SPLIT_DATASET_RELEASE,
+        "generation_parameters": generation,
+        "class_to_index": provenance["class_to_index"],
+        "source_files": provenance["source_files"],
+        "source_counts": provenance["source_counts"],
+        "source_per_class": provenance["source_per_class"],
+        "source_catalog_sha256": provenance["source_catalog_sha256"],
+        "release_contract": provenance["release_contract"],
+    }
+    expected_generation_fingerprint = _sha256_bytes(_canonical_json(fingerprint_payload))
+    if provenance["generation_fingerprint_sha256"] != expected_generation_fingerprint:
+        raise DatasetError("provenance generation fingerprint mismatch")
+
+    manifest_files = provenance["manifest_files"]
+    if not isinstance(manifest_files, dict) or set(manifest_files) != set(PROJECT_SPLITS):
+        raise DatasetError("provenance manifest_files does not describe train, validation, and test")
+    for split in PROJECT_SPLITS:
+        metadata = manifest_files[split]
+        if not isinstance(metadata, dict) or set(metadata) != {
+            "filename",
+            "sample_count",
+            "size_bytes",
+            "sha256",
+        }:
+            raise DatasetError(f"provenance manifest metadata is invalid for project split {split}")
+        if metadata["filename"] != MANIFEST_FILENAMES[split]:
+            raise DatasetError(f"provenance manifest filename mismatch for project split {split}")
+        if (
+            not _is_integer(metadata["sample_count"])
+            or int(metadata["sample_count"]) <= 0
+            or not _is_integer(metadata["size_bytes"])
+            or int(metadata["size_bytes"]) <= 0
+            or not _is_sha256(metadata["sha256"])
+        ):
+            raise DatasetError(f"provenance manifest checksum metadata is invalid for {split}")
+
+    project_counts = provenance["project_counts"]
+    if not isinstance(project_counts, dict) or set(project_counts) != set(PROJECT_SPLITS):
+        raise DatasetError("provenance project_counts must describe train, validation, and test")
+    if any(not _is_integer(value) or int(value) <= 0 for value in project_counts.values()):
+        raise DatasetError("provenance project_counts values must be positive integers")
+    if any(
+        project_counts[split] != manifest_files[split]["sample_count"]
+        for split in PROJECT_SPLITS
+    ):
+        raise DatasetError("provenance project counts do not match manifest metadata")
+
+    expected_sources = {
+        str(ARCHIVE_DIRECTORY / name): ("train_archive", True)
+        for name in TRAIN_ARCHIVE_NAMES
+    }
+    expected_sources[str(ARCHIVE_DIRECTORY / VALIDATION_ARCHIVE_NAME)] = (
+        "official_validation_archive",
+        True,
+    )
+    expected_sources.update(
+        {
+            str(ARCHIVE_DIRECTORY / name): ("bundled_full_dataset_list", False)
+            for name in BUNDLED_LIST_NAMES
+        }
+    )
+    source_files = provenance["source_files"]
+    if not isinstance(source_files, list) or len(source_files) != len(expected_sources):
+        raise DatasetError("provenance source_files does not describe the fixed release")
+    observed_sources: dict[str, tuple[object, object]] = {}
+    previous_path: str | None = None
+    for entry in source_files:
+        if not isinstance(entry, dict) or set(entry) != {
+            "relative_path",
+            "role",
+            "authoritative_for_membership",
+            "size_bytes",
+            "sha256",
+        }:
+            raise DatasetError("provenance source-file entry keys do not match the schema")
+        relative_path = entry["relative_path"]
+        if not isinstance(relative_path, str):
+            raise DatasetError("provenance source-file path must be a string")
+        _safe_posix_parts(relative_path, "provenance source-file path")
+        if previous_path is not None and relative_path <= previous_path:
+            raise DatasetError("provenance source files must be strictly path-sorted")
+        previous_path = relative_path
+        if (
+            not _is_integer(entry["size_bytes"])
+            or int(entry["size_bytes"]) <= 0
+            or not _is_sha256(entry["sha256"])
+            or not isinstance(entry["role"], str)
+            or not isinstance(entry["authoritative_for_membership"], bool)
+        ):
+            raise DatasetError(f"invalid source-file provenance for {relative_path}")
+        observed_sources[relative_path] = (
+            entry["role"],
+            entry["authoritative_for_membership"],
+        )
+    if observed_sources != expected_sources:
+        raise DatasetError("provenance source-file roles or authority mismatch")
 
 
 def _parse_manifest_row(
@@ -761,6 +961,11 @@ def _parse_class_mapping(value: object) -> dict[str, int]:
         raise DatasetError(
             f"provenance class_to_index must contain {EXPECTED_CLASS_COUNT} N-ImageNet mini classes"
         )
+    expected_mapping = {
+        class_id: index for index, class_id in enumerate(sorted(mapping))
+    }
+    if mapping != expected_mapping:
+        raise DatasetError("provenance class_to_index must use lexicographic synset order")
     return mapping
 
 
@@ -783,6 +988,12 @@ def _parse_checksum_file(payload: bytes) -> dict[str, str]:
     if not checksums:
         raise DatasetError("SHA256SUMS must not be empty")
     return checksums
+
+
+def _canonical_checksum_file(checksums: Mapping[str, str]) -> bytes:
+    return "".join(
+        f"{checksums[name]}  {name}\n" for name in sorted(checksums)
+    ).encode("ascii")
 
 
 def _decode_json_object(payload: bytes, *, description: str) -> dict[str, Any]:
@@ -844,6 +1055,14 @@ def _is_integer(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in _SHA256_CHARACTERS for character in value)
+    )
+
+
 __all__ = [
     "ADAPTER_SCHEMA_VERSION",
     "DATASET_NAME",
@@ -853,5 +1072,6 @@ __all__ = [
     "ManifestSample",
     "ManifestSampleMetadata",
     "inspect_sample",
+    "open_dataset",
     "renderer_provenance_fingerprint",
 ]

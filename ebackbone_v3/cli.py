@@ -93,8 +93,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_sample_parser.add_argument(
         "--split",
+        required=True,
         choices=("train", "validation", "test"),
-        help="Optional manifest role; --split test is required before final-test access.",
+        help="Explicit project role for the selected immutable manifest.",
+    )
+    inspect_sample_parser.add_argument(
+        "--allow-final-test",
+        action="store_true",
+        help="Required in addition to --split test before any final-test access.",
     )
     inspect_sample_parser.set_defaults(handler=_handle_inspect_sample)
 
@@ -112,12 +118,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     train_b0_parser = subparsers.add_parser(
         "train-b0",
-        help="Run the bounded real-data B0 tiny-overfit validation only.",
+        help="Train production B0 on full immutable train/validation manifests.",
     )
     train_b0_parser.add_argument(
-        "--manifest",
+        "--train-manifest",
         required=True,
         help="Path to the immutable project train.jsonl manifest.",
+    )
+    train_b0_parser.add_argument(
+        "--validation-manifest",
+        required=True,
+        help="Path to the immutable project validation.jsonl manifest.",
     )
     train_b0_parser.add_argument(
         "--dataset-root",
@@ -127,25 +138,48 @@ def build_parser() -> argparse.ArgumentParser:
     train_b0_parser.add_argument(
         "--output-dir",
         required=True,
-        help="New or empty directory for the bounded-run checkpoint and report.",
+        help="New output directory, or the existing run directory with --resume.",
     )
-    train_b0_parser.add_argument(
-        "--subset-size",
-        type=int,
-        default=16,
-        help="Deterministic tiny subset size; must be from 16 through 32 (default: 16).",
-    )
-    train_b0_parser.add_argument("--epochs", type=int, default=240)
-    train_b0_parser.add_argument("--batch-size", type=int, default=16)
-    train_b0_parser.add_argument("--learning-rate", type=float, default=0.01)
+    train_b0_parser.add_argument("--epochs", type=int, required=True)
+    train_b0_parser.add_argument("--batch-size", type=int, default=32)
+    train_b0_parser.add_argument("--learning-rate", type=float, default=0.05)
+    train_b0_parser.add_argument("--momentum", type=float, default=0.9)
+    train_b0_parser.add_argument("--weight-decay", type=float, default=1e-4)
     train_b0_parser.add_argument("--seed", type=int, default=20260715)
+    train_b0_parser.add_argument("--num-workers", type=int, default=16)
+    train_b0_parser.add_argument("--prefetch-factor", type=int, default=2)
     train_b0_parser.add_argument(
-        "--target-train-accuracy",
-        type=float,
-        default=0.95,
-        help="Minimum final tiny-subset accuracy required for PASS (default: 0.95).",
+        "--no-amp",
+        action="store_true",
+        help="Disable CUDA bfloat16 autocast (autocast is enabled by default on CUDA).",
+    )
+    train_b0_parser.add_argument(
+        "--stop-after-epoch",
+        type=int,
+        help="Stop cleanly after this epoch to exercise or schedule resume.",
+    )
+    train_b0_parser.add_argument(
+        "--resume",
+        help="Resume strictly from checkpoint_last.pt in the selected output directory.",
     )
     train_b0_parser.set_defaults(handler=_handle_train_b0)
+
+    debug_b0_parser = subparsers.add_parser(
+        "train-b0-debug",
+        help="Run only the explicit 16--32 sample tiny-overfit debug diagnostic.",
+    )
+    debug_b0_parser.add_argument("--manifest", required=True)
+    debug_b0_parser.add_argument(
+        "--dataset-root", default="/mnt/hdd1/datasets/event/n_imagenet"
+    )
+    debug_b0_parser.add_argument("--output-dir", required=True)
+    debug_b0_parser.add_argument("--subset-size", type=int, default=16)
+    debug_b0_parser.add_argument("--epochs", type=int, default=240)
+    debug_b0_parser.add_argument("--batch-size", type=int, default=16)
+    debug_b0_parser.add_argument("--learning-rate", type=float, default=0.01)
+    debug_b0_parser.add_argument("--seed", type=int, default=20260715)
+    debug_b0_parser.add_argument("--target-train-accuracy", type=float, default=0.95)
+    debug_b0_parser.set_defaults(handler=_handle_train_b0_debug)
     return parser
 
 
@@ -200,10 +234,33 @@ def _handle_inspect_sample(args: argparse.Namespace) -> dict[str, Any]:
         dataset_root=args.dataset_root,
         cache_root=args.cache_root,
         split=args.split,
+        allow_final_test=args.allow_final_test,
     )
 
 
 def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.b0_production import run_production_b0
+
+    return run_production_b0(
+        train_manifest_path=args.train_manifest,
+        validation_manifest_path=args.validation_manifest,
+        dataset_root=args.dataset_root,
+        output_dir=args.output_dir,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+        seed=args.seed,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        amp=not args.no_amp,
+        stop_after_epoch=args.stop_after_epoch,
+        resume=args.resume,
+    )
+
+
+def _handle_train_b0_debug(args: argparse.Namespace) -> dict[str, Any]:
     from ebackbone_v3.b0_training import run_tiny_overfit
 
     return run_tiny_overfit(

@@ -18,7 +18,10 @@ import torch
 
 import ebackbone_v3.n_imagenet_mini_dataset as dataset_module
 from ebackbone_v3.errors import DatasetError
-from ebackbone_v3.n_imagenet_mini_dataset import ManifestBackedNImageNetMiniDataset
+from ebackbone_v3.n_imagenet_mini_dataset import (
+    ManifestBackedNImageNetMiniDataset,
+    open_dataset,
+)
 from ebackbone_v3.n_imagenet_mini_index import build_archive_index
 from ebackbone_v3.representations import cache_path
 from ebackbone_v3.splits import (
@@ -146,6 +149,7 @@ def _dataset(
     cache: str = "off",
     cache_root: Path | None = None,
     explicit_split: str | None = None,
+    allow_final_test: bool = False,
 ) -> ManifestBackedNImageNetMiniDataset:
     return ManifestBackedNImageNetMiniDataset(
         manifest_path=release.manifest_dir / MANIFEST_FILENAMES[split],
@@ -153,7 +157,8 @@ def _dataset(
         baseline=baseline,  # type: ignore[arg-type]
         cache=cache,  # type: ignore[arg-type]
         cache_root=cache_root,
-        split=explicit_split,  # type: ignore[arg-type]
+        split=(split if explicit_split is None else explicit_split),  # type: ignore[arg-type]
+        allow_final_test=allow_final_test,
     )
 
 
@@ -189,6 +194,15 @@ def _rewrite_manifest_integrity(directory: Path, split: str, rows: list[dict[str
         checksum_lines.append(
             f"{hashlib.sha256((directory / name).read_bytes()).hexdigest()}  {name}\n"
         )
+    (directory / CHECKSUM_FILENAME).write_text("".join(checksum_lines), encoding="ascii")
+
+
+def _rewrite_checksum_file(directory: Path) -> None:
+    checksum_lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+        for path in sorted(directory.iterdir(), key=lambda candidate: candidate.name)
+        if path.name != CHECKSUM_FILENAME
+    ]
     (directory / CHECKSUM_FILENAME).write_text("".join(checksum_lines), encoding="ascii")
 
 
@@ -258,13 +272,13 @@ def _tamper_cached_manifest(cache_file: Path, *, field: str) -> None:
         )
 
 
-def test_resolves_train_validation_and_explicit_final_test_rows(
+def test_resolves_explicit_train_validation_and_opted_in_synthetic_final_test_rows(
     fixture_release: FixtureRelease,
 ) -> None:
     train_sample = _dataset(fixture_release, "train", baseline="b0")[0]
     validation_sample = _dataset(fixture_release, "validation", baseline="b0")[0]
 
-    with pytest.raises(DatasetError, match="explicit split='test'"):
+    with pytest.raises(DatasetError, match="allow_final_test=True"):
         _dataset(fixture_release, "test", baseline="b0")
 
     test_sample = _dataset(
@@ -272,6 +286,7 @@ def test_resolves_train_validation_and_explicit_final_test_rows(
         "test",
         baseline="b0",
         explicit_split="test",
+        allow_final_test=True,
     )[0]
 
     assert train_sample.metadata.split == "train"
@@ -289,6 +304,138 @@ def test_resolves_train_validation_and_explicit_final_test_rows(
         assert sample.raw_events.sample_id == sample.metadata.sample_id
         assert sample.raw_events.temporal_start == sample.metadata.temporal_start
         assert sample.raw_events.temporal_end == sample.metadata.temporal_end
+
+
+def test_missing_invalid_and_ambiguous_split_arguments_fail_closed(
+    fixture_release: FixtureRelease,
+) -> None:
+    common = {
+        "manifest_path": fixture_release.manifest_dir / MANIFEST_FILENAMES["train"],
+        "dataset_root": fixture_release.dataset_root,
+        "baseline": "b0",
+        "cache": "off",
+    }
+    with pytest.raises(TypeError, match="split"):
+        ManifestBackedNImageNetMiniDataset(**common)  # type: ignore[call-arg]
+    for invalid in (None, "", "val", False, True):
+        with pytest.raises(DatasetError, match="explicitly set"):
+            ManifestBackedNImageNetMiniDataset(**common, split=invalid)  # type: ignore[arg-type]
+    for legacy in ({"train": False}, {"eval": True}):
+        with pytest.raises(TypeError):
+            open_dataset(
+                manifest_dir=fixture_release.manifest_dir,
+                split="train",
+                dataset_root=fixture_release.dataset_root,
+                **legacy,  # type: ignore[arg-type]
+            )
+
+
+def test_denied_final_test_access_reads_no_manifest_or_archive(
+    fixture_release: FixtureRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dataset_module,
+        "_read_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("manifest read")),
+    )
+    monkeypatch.setattr(
+        dataset_module,
+        "_read_archive_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("archive read")),
+    )
+
+    with pytest.raises(DatasetError, match="no test manifest or archive member was read"):
+        open_dataset(
+            manifest_dir=fixture_release.manifest_dir,
+            split="test",
+            dataset_root=fixture_release.dataset_root,
+        )
+
+
+def test_manifest_checksum_and_provenance_mismatches_fail_before_archive_access(
+    fixture_release: FixtureRelease,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        dataset_module,
+        "_read_archive_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("archive read")),
+    )
+
+    checksum_dir = tmp_path / "checksum-mismatch"
+    shutil.copytree(fixture_release.manifest_dir, checksum_dir)
+    with (checksum_dir / MANIFEST_FILENAMES["train"]).open("ab") as handle:
+        handle.write(b" ")
+    with pytest.raises(DatasetError, match="manifest SHA-256 does not match"):
+        open_dataset(
+            manifest_dir=checksum_dir,
+            split="train",
+            dataset_root=fixture_release.dataset_root,
+        )
+
+    provenance_dir = tmp_path / "provenance-mismatch"
+    shutil.copytree(fixture_release.manifest_dir, provenance_dir)
+    provenance_path = provenance_dir / "provenance.json"
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["dataset_release"] = "wrong release"
+    provenance_path.write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_checksum_file(provenance_dir)
+    with pytest.raises(DatasetError, match="dataset release mismatch"):
+        open_dataset(
+            manifest_dir=provenance_dir,
+            split="train",
+            dataset_root=fixture_release.dataset_root,
+        )
+
+
+def test_runtime_membership_uses_only_selected_manifests_and_never_scans_archives(
+    fixture_release: FixtureRelease,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_reads: list[str] = []
+    original_read_bytes = dataset_module._read_bytes
+
+    def recording_read_bytes(path: Path, description: str) -> bytes:
+        manifest_reads.append(path.name)
+        return original_read_bytes(path, description)
+
+    monkeypatch.setattr(dataset_module, "_read_bytes", recording_read_bytes)
+    monkeypatch.setattr(
+        Path,
+        "glob",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("archive glob")),
+    )
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("archive rglob")),
+    )
+
+    train = open_dataset(
+        manifest_dir=fixture_release.manifest_dir,
+        split="train",
+        dataset_root=fixture_release.dataset_root,
+        baseline="b0",
+    )
+    validation = open_dataset(
+        manifest_dir=fixture_release.manifest_dir,
+        split="validation",
+        dataset_root=fixture_release.dataset_root,
+        baseline="b0",
+    )
+
+    assert "test.jsonl" not in manifest_reads
+    assert {row.split for row in train._rows} == {"train"}  # noqa: SLF001
+    assert {row.source_split for row in train._rows} == {"train"}  # noqa: SLF001
+    assert {row.split for row in validation._rows} == {"validation"}  # noqa: SLF001
+    assert {row.source_split for row in validation._rows} == {"train"}  # noqa: SLF001
+    train_ids = {row.sample_id for row in train._rows}  # noqa: SLF001
+    validation_ids = {row.sample_id for row in validation._rows}  # noqa: SLF001
+    assert not (train_ids & validation_ids)
 
 
 def test_declared_archive_and_member_are_opened_without_extraction(
@@ -520,6 +667,8 @@ def test_inspect_sample_cli_reports_metadata_and_tensor_summaries_only(
             "b0",
             "--cache",
             "off",
+            "--split",
+            "train",
             "--dataset-root",
             str(fixture_release.dataset_root),
         ],

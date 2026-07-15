@@ -111,8 +111,11 @@ same verified raw-event fingerprint and temporal interval. `--cache off` reads
 and writes no cache. `--cache on` requires an explicit `--cache-root <path>`;
 cache acceptance is provenance-validated against the production renderer and
 contract versions, project/source split identity, the exact raw payload hash,
-and the raw-event identity, so a stale entry is never silently reused. Project-final-test rows are not loaded by
-default: inspecting `test.jsonl` requires an explicit `--split test` argument.
+and the raw-event identity, so a stale entry is never silently reused. Every
+inspection requires an explicit project `--split`. Project-final-test rows are
+fail-closed: inspecting `test.jsonl` requires both `--split test` and
+`--allow-final-test`, and denial occurs before reading the test manifest or an
+archive member.
 
 `train-b0-debug` is intentionally limited to the first real-data B0 validation: a
 deterministic 16--32 sample overfit run from `train.jsonl`. It materializes only

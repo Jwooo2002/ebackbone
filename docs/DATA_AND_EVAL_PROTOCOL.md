@@ -107,12 +107,21 @@ validates its one-dimensional `x:uint16`, `y:uint16`, `t:uint16`, and `p:bool`
 arrays before representation rendering. It does not initialize CUDA, construct
 or run a model, batch samples, augment samples, or execute a training loop.
 
-Project-final-test access is intentionally gated. Train and internal-validation
-rows may be selected from their canonical manifest filenames without a separate
-split flag, but a `test.jsonl` row is rejected unless the caller explicitly
-requests project `test` (the CLI spelling is `--split test`). A dataset-native
+Project roles are explicit and fail closed. Runtime callers must request exactly
+`train`, `validation`, or `test`; filenames, `train=False`, `eval=True`, and
+missing values never infer a role. Final-test access requires both `split="test"`
+and `allow_final_test=True` (CLI: `--split test --allow-final-test`). The gate is
+checked before any test manifest or archive member is read. A dataset-native
 source split remains `validation` for those rows; `test` is only the explicit
-project role.
+project role. Training and checkpoint-selection construction accepts only project
+train and internal validation, both backed by source-train manifest rows.
+
+The runtime adapter derives canonical manifest filenames from the explicit role,
+validates canonical manifest/provenance/checksum metadata before accepting row
+membership, and opens only the archive/member locator named by that immutable
+row. It does not call the archive-index builder, glob archives, accept membership
+predicates, or derive another split at runtime. Opening train or validation does
+not parse `test.jsonl`.
 
 ## Raw event contract
 
