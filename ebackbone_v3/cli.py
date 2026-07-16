@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     train_b0_parser = subparsers.add_parser(
         "train-b0",
-        help="Train production B0 on full immutable train/validation manifests.",
+        help="Train production B0 on immutable train/validation manifests.",
     )
     train_b0_parser.add_argument(
         "--manifest-dir",
@@ -141,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
     train_b0_parser.add_argument("--momentum", type=float, default=0.9)
     train_b0_parser.add_argument("--weight-decay", type=float, default=1e-4)
     train_b0_parser.add_argument("--seed", type=int, default=20260715)
+    train_b0_parser.add_argument(
+        "--train-subset-per-class",
+        type=int,
+        help="Optional deterministic per-class project-train pilot subset.",
+    )
+    train_b0_parser.add_argument(
+        "--validation-subset-per-class",
+        type=int,
+        help="Optional deterministic per-class internal-validation pilot subset.",
+    )
     train_b0_parser.add_argument("--num-workers", type=int, default=0)
     train_b0_parser.add_argument("--prefetch-factor", type=int, default=2)
     train_b0_parser.add_argument(
@@ -150,9 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train_b0_parser.add_argument(
         "--device",
-        choices=("cpu", "cuda"),
+        choices=("cpu", "cuda:1"),
         default="cpu",
-        help="Execution device; CPU is the fail-safe default and CUDA requires explicit selection.",
+        help="Execution device; CPU is the fail-safe default and cuda:1 is the only permitted GPU.",
     )
     train_b0_parser.add_argument(
         "--stop-after-epoch",
@@ -164,6 +174,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resume strictly from checkpoint_last.pt in the selected output directory.",
     )
     train_b0_parser.set_defaults(handler=_handle_train_b0)
+
+    benchmark_b0_parser = subparsers.add_parser(
+        "benchmark-b0-throughput", help="Bounded train-only B0 cache/loader benchmark on cuda:1."
+    )
+    benchmark_b0_parser.add_argument("--manifest-dir", required=True)
+    benchmark_b0_parser.add_argument("--dataset-root", default="/mnt/hdd1/datasets/event/n_imagenet")
+    benchmark_b0_parser.add_argument("--cache-root", required=True)
+    benchmark_b0_parser.add_argument("--output-dir", required=True)
+    benchmark_b0_parser.add_argument("--seed", type=int, default=20260716)
+    benchmark_b0_parser.add_argument("--per-class", type=int, default=1)
+    benchmark_b0_parser.set_defaults(handler=_handle_benchmark_b0_throughput)
 
     debug_b0_parser = subparsers.add_parser(
         "train-b0-debug",
@@ -280,12 +301,22 @@ def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
         momentum=args.momentum,
         weight_decay=args.weight_decay,
         seed=args.seed,
+        train_subset_per_class=args.train_subset_per_class,
+        validation_subset_per_class=args.validation_subset_per_class,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
         amp=not args.no_amp,
         device_name=args.device,
         stop_after_epoch=args.stop_after_epoch,
         resume=args.resume,
+    )
+
+
+def _handle_benchmark_b0_throughput(args: argparse.Namespace) -> dict[str, Any]:
+    from ebackbone_v3.b0_throughput import run_b0_throughput_benchmark
+    return run_b0_throughput_benchmark(
+        manifest_dir=args.manifest_dir, dataset_root=args.dataset_root, cache_root=args.cache_root,
+        output_dir=args.output_dir, seed=args.seed, per_class=args.per_class,
     )
 
 

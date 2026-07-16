@@ -18,6 +18,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.utils.data import Subset
 
 from ebackbone_v3.b0_models import (
     B0_BOUNDED_CPU_BATCH_SIZE,
@@ -125,6 +126,8 @@ def collate_production_b0(samples: Sequence[ManifestSample]) -> dict[str, Any]:
     sample_ids: list[str] = []
     project_splits: list[str] = []
     source_splits: list[str] = []
+    archive_decode_seconds: list[float] = []
+    frame_stage_seconds: list[float] = []
     for sample in samples:
         if set(sample.tensors) != {"event_frame"}:
             raise TrainingError("production B0 loader exposed a non-frame representation")
@@ -140,12 +143,16 @@ def collate_production_b0(samples: Sequence[ManifestSample]) -> dict[str, Any]:
         sample_ids.append(sample.metadata.sample_id)
         project_splits.append(sample.metadata.split)
         source_splits.append(sample.metadata.source_split)
+        archive_decode_seconds.append(float(getattr(sample.metadata, "archive_decode_seconds", 0.0)))
+        frame_stage_seconds.append(float(getattr(sample.metadata, "frame_stage_seconds", 0.0)))
     return {
         "event_frames": torch.from_numpy(np.stack(frames, axis=0)),
         "labels": torch.tensor(labels, dtype=torch.long),
         "sample_ids": sample_ids,
         "project_splits": project_splits,
         "source_splits": source_splits,
+        "archive_decode_seconds": archive_decode_seconds,
+        "frame_stage_seconds": frame_stage_seconds,
     }
 
 
@@ -175,6 +182,8 @@ def run_production_b0(
     prefetch_factor: int = 2,
     amp: bool = True,
     device_name: str = "cpu",
+    train_subset_per_class: int | None = None,
+    validation_subset_per_class: int | None = None,
     stop_after_epoch: int | None = None,
     resume: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -190,6 +199,8 @@ def run_production_b0(
         prefetch_factor=prefetch_factor,
         device_name=device_name,
         stop_after_epoch=stop_after_epoch,
+        train_subset_per_class=train_subset_per_class,
+        validation_subset_per_class=validation_subset_per_class,
     )
     output = Path(output_dir).expanduser().resolve()
     resume_path = Path(resume).expanduser().resolve() if resume is not None else None
@@ -216,6 +227,13 @@ def run_production_b0(
     if train_dataset.renderer_fingerprint != validation_dataset.renderer_fingerprint:
         raise TrainingError("train and validation renderer provenance differs")
 
+    train_subset, train_subset_audit = _deterministic_balanced_subset(
+        train_dataset, per_class=train_subset_per_class, seed=seed, split="train"
+    )
+    validation_subset, validation_subset_audit = _deterministic_balanced_subset(
+        validation_dataset, per_class=validation_subset_per_class, seed=seed, split="validation"
+    )
+
     train_manifest = _manifest_identity(train_dataset.manifest_path, "train", len(train_dataset))
     validation_manifest = _manifest_identity(
         validation_dataset.manifest_path, "validation", len(validation_dataset)
@@ -235,6 +253,8 @@ def run_production_b0(
         prefetch_factor=prefetch_factor,
         amp=use_amp,
         device=device,
+        train_subset_audit=train_subset_audit,
+        validation_subset_audit=validation_subset_audit,
     )
 
     model = build_b0_model(class_count=B0_CLASS_COUNT).to(device)
@@ -296,7 +316,7 @@ def run_production_b0(
         )
         for epoch in range(start_epoch, final_epoch + 1):
             train_loader = _make_loader(
-                train_dataset,
+                train_subset,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=num_workers,
@@ -305,7 +325,7 @@ def run_production_b0(
                 seed=seed + epoch,
             )
             validation_loader = _make_loader(
-                validation_dataset,
+                validation_subset,
                 batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_workers,
@@ -321,7 +341,7 @@ def run_production_b0(
                 device=device,
                 use_amp=use_amp,
                 epoch=epoch,
-                expected_sample_count=len(train_dataset),
+                expected_sample_count=len(train_subset),
                 log_handle=log_handle,
             )
             validation_metrics = _run_validation_epoch(
@@ -330,7 +350,7 @@ def run_production_b0(
                 device=device,
                 use_amp=use_amp,
                 epoch=epoch,
-                expected_sample_count=len(validation_dataset),
+                expected_sample_count=len(validation_subset),
             )
             scheduler.step()
             epoch_record = {
@@ -371,7 +391,11 @@ def run_production_b0(
     report = {
         "schema_version": PRODUCTION_REPORT_SCHEMA_VERSION,
         "status": "PASS" if completed else "PARTIAL",
-        "mode": "production_full_manifest_b0",
+        "mode": (
+            "production_b0"
+            if train_subset_per_class is None and validation_subset_per_class is None
+            else "bounded_balanced_b0_pilot"
+        ),
         "completed_requested_epochs": completed,
         "run_config": run_config,
         "model": {
@@ -690,6 +714,8 @@ def _run_config(
     prefetch_factor: int,
     amp: bool,
     device: torch.device,
+    train_subset_audit: dict[str, Any],
+    validation_subset_audit: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "baseline": "b0",
@@ -735,6 +761,11 @@ def _run_config(
             "num_workers": num_workers,
             "prefetch_factor": prefetch_factor,
             "drop_last": False,
+        },
+        "subset": {
+            "train": train_subset_audit,
+            "validation": validation_subset_audit,
+            "selection_usage": "deterministic dataset bookkeeping only; labels do not affect rendering",
         },
         "manifests": {
             "train": asdict(train_manifest),
@@ -824,6 +855,8 @@ def _validate_arguments(
     prefetch_factor: int,
     device_name: str,
     stop_after_epoch: int | None,
+    train_subset_per_class: int | None,
+    validation_subset_per_class: int | None,
 ) -> None:
     for name, value in (("epochs", epochs), ("batch_size", batch_size)):
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -838,16 +871,75 @@ def _validate_arguments(
         raise TrainingError("num_workers must be a non-negative integer")
     if isinstance(prefetch_factor, bool) or not isinstance(prefetch_factor, int) or prefetch_factor <= 0:
         raise TrainingError("prefetch_factor must be a positive integer")
-    if device_name not in {"cpu", "cuda"}:
-        raise TrainingError("device_name must be 'cpu' or 'cuda'")
+    if device_name not in {"cpu", "cuda:1"}:
+        raise TrainingError("device_name must be 'cpu' or 'cuda:1'")
     if stop_after_epoch is not None and not 1 <= stop_after_epoch <= epochs:
         raise TrainingError("stop_after_epoch must be between one and epochs")
+    for name, value in (
+        ("train_subset_per_class", train_subset_per_class),
+        ("validation_subset_per_class", validation_subset_per_class),
+    ):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        ):
+            raise TrainingError(f"{name} must be a positive integer when provided")
 
 
 def _resolve_device(device_name: str) -> torch.device:
-    if device_name == "cuda" and not torch.cuda.is_available():
+    if device_name == "cuda:1" and not torch.cuda.is_available():
         raise TrainingError("CUDA was explicitly requested but is not available")
     return torch.device(device_name)
+
+
+def _deterministic_balanced_subset(
+    dataset: Any,
+    *,
+    per_class: int | None,
+    seed: int,
+    split: str,
+) -> tuple[Sequence[ManifestSample], dict[str, Any]]:
+    """Select a stable per-class subset from immutable metadata without opening samples."""
+
+    if per_class is None:
+        return dataset, {
+            "enabled": False,
+            "selection_method": "all immutable manifest rows",
+            "selected_sample_count": len(dataset),
+        }
+    sample_ids = dataset.sample_ids
+    class_indices = dataset.class_indices
+    if len(sample_ids) != len(class_indices) or len(sample_ids) != len(dataset):
+        raise TrainingError("manifest metadata dimensions disagree during subset selection")
+    by_class: dict[int, list[tuple[bytes, int, str]]] = {}
+    for index, (sample_id, class_index) in enumerate(zip(sample_ids, class_indices)):
+        rank = hashlib.sha256(f"b0-pilot-subset\\0{seed}\\0{sample_id}".encode("utf-8")).digest()
+        by_class.setdefault(class_index, []).append((rank, index, sample_id))
+    expected_classes = set(range(B0_CLASS_COUNT))
+    if set(by_class) != expected_classes:
+        raise TrainingError(f"{split} manifest does not contain exactly the expected 100 classes")
+    selected_indices: list[int] = []
+    for class_index in range(B0_CLASS_COUNT):
+        ranked = sorted(by_class[class_index])
+        if len(ranked) < per_class:
+            raise TrainingError(
+                f"{split} class {class_index} has {len(ranked)} samples; requires {per_class}"
+            )
+        chosen = ranked[:per_class]
+        selected_indices.extend(index for _, index, _ in chosen)
+    selected_indices.sort()
+    digest = hashlib.sha256()
+    for index in selected_indices:
+        digest.update(sample_ids[index].encode("utf-8") + b"\\n")
+    return Subset(dataset, selected_indices), {
+        "enabled": True,
+        "selection_method": "per-class SHA-256 rank of b0-pilot-subset, seed, and stable sample id",
+        "seed": seed,
+        "requested_per_class": per_class,
+        "class_count": B0_CLASS_COUNT,
+        "selected_sample_count": len(selected_indices),
+        "selected_sample_id_sha256": digest.hexdigest(),
+        "labels_used_only_for": "deterministic dataset bookkeeping",
+    }
 
 
 def _seed_everything(seed: int, *, include_cuda: bool) -> None:
@@ -892,9 +984,11 @@ def _restore_rng_state(state: dict[str, Any]) -> None:
             float(numpy_state["cached_gaussian"]),
         )
     )
-    torch.set_rng_state(state["torch_cpu"])
+    torch.set_rng_state(torch.as_tensor(state["torch_cpu"], dtype=torch.uint8, device="cpu"))
     if torch.cuda.is_available() and state["torch_cuda"]:
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
+        torch.cuda.set_rng_state_all(
+            [torch.as_tensor(value, dtype=torch.uint8, device="cpu") for value in state["torch_cuda"]]
+        )
 
 
 def _numpy_rng_state() -> dict[str, Any]:

@@ -24,6 +24,7 @@ DATASET_RELEASE = "N-ImageNet mini 100-class original train/validation release"
 # provenance could not distinguish alternate NPZ encodings of otherwise equal
 # x/y/t/p arrays or a changed project role for the same source record.
 CACHE_SCHEMA_VERSION = 3
+FRAME_CACHE_SCHEMA_VERSION = 1
 SOURCE_HEIGHT = 480
 SOURCE_WIDTH = 640
 POLARITY_ORDER = ("negative", "positive")
@@ -296,6 +297,100 @@ def cache_path(cache_root: str | Path, cache_key: str) -> Path:
     return Path(cache_root) / cache_key[:2] / f"{cache_key}.npz"
 
 
+def frame_cache_key(*, source: SourceIdentity, config: RendererConfig) -> str:
+    """Key for the B0-only cache; it cannot collide with a B1 bundle entry."""
+
+    return hashlib.sha256(
+        _canonical_json(
+            {
+                "frame_cache_schema_version": FRAME_CACHE_SCHEMA_VERSION,
+                "representation_cache_key": representation_cache_key(source=source, config=config),
+                "tensor_names": ["event_frame"],
+            }
+        )
+    ).hexdigest()
+
+
+def write_frame_cache(
+    path: str | Path, frame: ProductionEventFrame, *, cache_key: str | None = None
+) -> None:
+    """Atomically persist exactly one B0 event frame, never B1 tensors."""
+
+    _require_production_config(frame.config)
+    tensor = np.asarray(frame.event_frame)
+    if tensor.shape != _expected_shapes(frame.config)["event_frame"] or tensor.dtype != np.float32:
+        raise RepresentationError("frame cache tensor violates the B0 event-frame contract")
+    if not bool(np.isfinite(tensor).all()):
+        raise RepresentationError("frame cache tensor must be finite")
+    key = frame_cache_key(source=frame.source, config=frame.config) if cache_key is None else cache_key
+    if len(key) != 64 or any(character not in "0123456789abcdef" for character in key):
+        raise RepresentationError("frame cache key must be a lowercase SHA-256 hex digest")
+    manifest = {
+        "frame_cache_schema_version": FRAME_CACHE_SCHEMA_VERSION,
+        "cache_key": key,
+        "source": frame.source.to_dict(),
+        "renderer": frame.config.to_dict(),
+        "tensor": {"shape": list(tensor.shape), "dtype": "float32", "sha256": _tensor_sha256(tensor)},
+    }
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("wb") as handle:
+            np.savez(handle, event_frame=tensor, manifest_utf8=np.frombuffer(_canonical_json(manifest), dtype=np.uint8))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_frame_cache(
+    path: str | Path, *, expected_source: SourceIdentity, expected_config: RendererConfig,
+    expected_cache_key: str | None = None,
+) -> ProductionEventFrame:
+    """Strictly validate a B0-only cache entry before returning its frame."""
+
+    key = frame_cache_key(source=expected_source, config=expected_config) if expected_cache_key is None else expected_cache_key
+    try:
+        with np.load(Path(path), allow_pickle=False) as archive:
+            if set(archive.files) != {"event_frame", "manifest_utf8"}:
+                raise RepresentationError("frame cache contains non-B0 tensors")
+            manifest = json.loads(bytes(archive["manifest_utf8"]).decode("utf-8"))
+            tensor = archive["event_frame"].copy()
+    except RepresentationError:
+        raise
+    except Exception as exc:
+        raise RepresentationError(f"could not read frame cache: {exc}") from exc
+    source_record = manifest.get("source")
+    if not isinstance(source_record, dict):
+        raise RepresentationError("frame cache source provenance is malformed")
+    # A manifest-backed B0 cache hit deliberately validates only catalog facts:
+    # the immutable sample ID and raw NPZ content digest.  Event-level facts are
+    # retained in the entry for metadata but are not re-derived from an archive.
+    catalog_match = (
+        source_record.get("sample_id") == expected_source.sample_id
+        and source_record.get("split") == expected_source.split
+        and source_record.get("project_split") == expected_source.project_split
+        and source_record.get("raw_content_sha256") == expected_source.raw_content_sha256
+    )
+    if (manifest.get("frame_cache_schema_version") != FRAME_CACHE_SCHEMA_VERSION
+            or manifest.get("cache_key") != key
+            or not catalog_match
+            or manifest.get("renderer") != expected_config.to_dict()):
+        raise RepresentationError("frame cache provenance does not match expected renderer/source")
+    record = manifest.get("tensor", {})
+    if (tensor.shape != _expected_shapes(expected_config)["event_frame"] or tensor.dtype != np.float32
+            or record.get("shape") != list(tensor.shape) or record.get("dtype") != "float32"
+            or record.get("sha256") != _tensor_sha256(tensor) or not bool(np.isfinite(tensor).all())):
+        raise RepresentationError("frame cache tensor validation failed")
+    try:
+        stored_source = SourceIdentity(**source_record)
+    except (TypeError, RepresentationError) as exc:
+        raise RepresentationError(f"frame cache source provenance is invalid: {exc}") from exc
+    return ProductionEventFrame(event_frame=tensor, source=stored_source, config=expected_config, cache_key=key)
+
+
 def write_representation_cache(path: str | Path, bundle: ProductionRepresentations) -> None:
     """Atomically write an uncompressed, pickle-free NPZ with canonical provenance."""
 
@@ -497,6 +592,7 @@ def _canonical_json(value: object) -> bytes:
 
 __all__ = [
     "CACHE_SCHEMA_VERSION",
+    "FRAME_CACHE_SCHEMA_VERSION",
     "CONTRACT_NAME",
     "compute_event_fingerprint",
     "DATASET_RELEASE",
@@ -508,9 +604,12 @@ __all__ = [
     "RepresentationError",
     "SourceIdentity",
     "cache_path",
+    "frame_cache_key",
+    "read_frame_cache",
     "read_representation_cache",
     "render_production_event_frame",
     "render_production_representations",
     "representation_cache_key",
     "write_representation_cache",
+    "write_frame_cache",
 ]

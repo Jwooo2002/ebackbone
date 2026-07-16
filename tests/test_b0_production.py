@@ -180,6 +180,8 @@ def test_b0_collate_requests_only_native_event_frames() -> None:
         "sample_ids",
         "project_splits",
         "source_splits",
+        "archive_decode_seconds",
+        "frame_stage_seconds",
     }
 
     invalid = SimpleNamespace(

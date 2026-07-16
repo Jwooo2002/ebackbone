@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tarfile
+import time
 import zipfile
 from dataclasses import asdict, dataclass
 from io import BytesIO
@@ -39,11 +40,14 @@ from ebackbone_v3.representations import (
     SourceIdentity,
     cache_path,
     compute_event_fingerprint,
+    frame_cache_key,
+    read_frame_cache,
     read_representation_cache,
     render_production_event_frame,
     render_production_representations,
     representation_cache_key,
     write_representation_cache,
+    write_frame_cache,
 )
 from ebackbone_v3.splits import (
     CHECKSUM_FILENAME,
@@ -128,13 +132,15 @@ class ManifestSampleMetadata:
     cache_key: str
     cache_status: str
     cache_path: str | None
+    archive_decode_seconds: float
+    frame_stage_seconds: float
 
 
 @dataclass(frozen=True)
 class ManifestSample:
-    """Archive-native raw record plus the requested production tensor selection."""
+    """Requested production tensor selection; raw fields are absent on B0 cache hits."""
 
-    raw_events: RawEventRecord
+    raw_events: RawEventRecord | None
     tensors: Mapping[str, np.ndarray]
     metadata: ManifestSampleMetadata
 
@@ -166,11 +172,6 @@ class _ManifestBackedNImageNetMiniDataset:
             raise DatasetError("cache must be 'off' or 'on'")
         if cache == "on" and cache_root is None:
             raise DatasetError("cache='on' requires an explicit cache_root")
-        if baseline == "b0" and cache != "off":
-            raise DatasetError(
-                "B0 requires cache='off' so frame-only access never reads or creates "
-                "voxel-grid or time-surface cache entries"
-            )
         if renderer_config != DEFAULT_RENDERER_CONFIG:
             raise DatasetError(
                 "the manifest-backed adapter accepts only the fixed D012 production renderer"
@@ -199,11 +200,17 @@ class _ManifestBackedNImageNetMiniDataset:
 
         return tuple(row.sample_id for row in self._rows)
 
+    @property
+    def class_indices(self) -> tuple[int, ...]:
+        """Return immutable class indices for deterministic split bookkeeping only."""
+
+        return tuple(row.class_index for row in self._rows)
+
     def __getitem__(self, index: int) -> ManifestSample:
         return self.get(index)
 
     def get(self, index: int) -> ManifestSample:
-        """Resolve one manifest row through raw-byte verification and D012 rendering."""
+        """Resolve one row, avoiding all source archive I/O on a valid B0 cache hit."""
 
         if isinstance(index, bool) or not isinstance(index, int):
             raise TypeError("sample index must be an integer")
@@ -214,12 +221,29 @@ class _ManifestBackedNImageNetMiniDataset:
         except IndexError as exc:
             raise IndexError(f"sample index {index} is outside manifest length {len(self)}") from exc
 
-        payload = _read_archive_payload(self.dataset_root, row)
-        _validate_raw_payload(payload, row)
-        fields = _decode_event_fields(payload, sample_id=row.sample_id)
-        source = _source_identity(row, fields)
-        raw_events = _raw_event_record(row, fields, source)
-        bundle, cache_status, resolved_cache_path = self._load_or_render(fields, source)
+        if self.baseline == "b0" and self.cache == "on":
+            started = time.perf_counter()
+            cached = self._try_frame_cache(row)
+            frame_stage_seconds = time.perf_counter() - started
+            if cached is not None:
+                bundle, resolved_cache_path = cached
+                source = bundle.source
+                cache_status = "hit"
+                raw_events = None
+                archive_decode_seconds = 0.0
+            else:
+                source, raw_events, bundle, cache_status, resolved_cache_path, archive_decode_seconds, frame_stage_seconds = self._read_render_frame(row)
+        else:
+            started = time.perf_counter()
+            payload = _read_archive_payload(self.dataset_root, row)
+            _validate_raw_payload(payload, row)
+            fields = _decode_event_fields(payload, sample_id=row.sample_id)
+            archive_decode_seconds = time.perf_counter() - started
+            source = _source_identity(row, fields)
+            raw_events = _raw_event_record(row, fields, source)
+            started = time.perf_counter()
+            bundle, cache_status, resolved_cache_path = self._load_or_render(fields, source)
+            frame_stage_seconds = time.perf_counter() - started
 
         requested_names = (
             ("event_frame",)
@@ -249,6 +273,8 @@ class _ManifestBackedNImageNetMiniDataset:
             cache_key=bundle.cache_key,
             cache_status=cache_status,
             cache_path=(str(resolved_cache_path) if resolved_cache_path is not None else None),
+            archive_decode_seconds=archive_decode_seconds,
+            frame_stage_seconds=frame_stage_seconds,
         )
         return ManifestSample(
             raw_events=raw_events,
@@ -256,13 +282,98 @@ class _ManifestBackedNImageNetMiniDataset:
             metadata=metadata,
         )
 
+    def _catalog_frame_source(self, row: ManifestRow) -> SourceIdentity:
+        """Catalog-only expectation used before any archive is touched.
+
+        The placeholder event fields are never returned or used to render; the
+        cache reader compares only immutable catalog identity fields.
+        """
+        return SourceIdentity(
+            sample_id=row.sample_id, split=row.source_split,
+            event_subset_id=f"sha256:{row.raw_content_sha256}", temporal_start=0,
+            temporal_end=0, interval_closure="[]", event_count=1,
+            raw_content_sha256=row.raw_content_sha256, project_split=row.split,
+        )
+
+    def _catalog_frame_cache_key(self, row: ManifestRow) -> str:
+        payload = {
+            "frame_cache_schema_version": 1,
+            "contract_name": CONTRACT_NAME,
+            "renderer": self.renderer_config.to_dict(),
+            "sample_id": row.sample_id,
+            "source_split": row.source_split,
+            "project_split": row.split,
+            "raw_content_sha256": row.raw_content_sha256,
+            "tensor_names": ["event_frame"],
+        }
+        return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+    def _try_frame_cache(self, row: ManifestRow) -> tuple[Any, Path] | None:
+        assert self.cache_root is not None
+        key = self._catalog_frame_cache_key(row)
+        target = cache_path(self.cache_root, key)
+        if not target.exists():
+            return None
+        if not target.is_file():
+            raise DatasetError(f"frame cache target is not a regular file: {target}")
+        try:
+            return read_frame_cache(
+                target, expected_source=self._catalog_frame_source(row),
+                expected_config=self.renderer_config, expected_cache_key=key,
+            ), target
+        except RepresentationError:
+            # A corrupt/stale entry is rebuilt through verified source bytes.
+            return None
+
+    def _read_render_frame(self, row: ManifestRow) -> tuple[Any, RawEventRecord, Any, str, Path, float, float]:
+        started = time.perf_counter()
+        payload = _read_archive_payload(self.dataset_root, row)
+        _validate_raw_payload(payload, row)
+        fields = _decode_event_fields(payload, sample_id=row.sample_id)
+        archive_decode_seconds = time.perf_counter() - started
+        source = _source_identity(row, fields)
+        raw_events = _raw_event_record(row, fields, source)
+        started = time.perf_counter()
+        frame = _render_frame(fields, source, self.renderer_config)
+        key = self._catalog_frame_cache_key(row)
+        assert self.cache_root is not None
+        target = cache_path(self.cache_root, key)
+        stale = target.exists()
+        try:
+            write_frame_cache(target, frame, cache_key=key)
+        except (OSError, RepresentationError) as exc:
+            raise DatasetError(f"could not write B0 frame cache {target}: {exc}") from exc
+        return source, raw_events, frame, ("stale_rebuilt" if stale else "miss"), target, archive_decode_seconds, time.perf_counter() - started
+
     def _load_or_render(
         self,
         fields: Mapping[str, np.ndarray],
         source: SourceIdentity,
     ) -> tuple[Any, str, Path | None]:
         if self.baseline == "b0":
-            return _render_frame(fields, source, self.renderer_config), "off", None
+            expected_key = frame_cache_key(source=source, config=self.renderer_config)
+            if self.cache == "off":
+                return _render_frame(fields, source, self.renderer_config), "off", None
+            assert self.cache_root is not None
+            target = cache_path(self.cache_root, expected_key)
+            stale_entry = False
+            if target.exists():
+                if not target.is_file():
+                    raise DatasetError(f"frame cache target is not a regular file: {target}")
+                try:
+                    cached = read_frame_cache(
+                        target, expected_source=source, expected_config=self.renderer_config
+                    )
+                except RepresentationError:
+                    stale_entry = True
+                else:
+                    return cached, "hit", target
+            frame = _render_frame(fields, source, self.renderer_config)
+            try:
+                write_frame_cache(target, frame)
+            except (OSError, RepresentationError) as exc:
+                raise DatasetError(f"could not write B0 frame cache {target}: {exc}") from exc
+            return frame, ("stale_rebuilt" if stale_entry else "miss"), target
 
         try:
             expected_key = representation_cache_key(

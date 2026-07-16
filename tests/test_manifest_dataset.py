@@ -557,7 +557,7 @@ def test_b0_frame_only_and_b1_bundle_share_identity_and_interval(
     )
 
 
-def test_b0_never_calls_tri_representation_renderer_or_cache_path(
+def test_b0_frame_cache_never_calls_tri_representation_renderer(
     fixture_release: FixtureRelease,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -573,14 +573,40 @@ def test_b0_never_calls_tri_representation_renderer_or_cache_path(
     assert set(sample.tensors) == {"event_frame"}
     assert sample.metadata.cache_status == "off"
 
-    with pytest.raises(DatasetError, match="frame-only access"):
-        _dataset(
-            fixture_release,
-            "train",
-            baseline="b0",
-            cache="on",
-            cache_root=tmp_path / "cache",
-        )
+    cached = _dataset(
+        fixture_release, "train", baseline="b0", cache="on", cache_root=tmp_path / "cache"
+    )[0]
+    assert cached.metadata.cache_status == "miss"
+    cache_file = Path(cached.metadata.cache_path or "")
+    with np.load(cache_file, allow_pickle=False) as archive:
+        assert set(archive.files) == {"event_frame", "manifest_utf8"}
+
+
+def test_b0_warm_frame_cache_opens_no_source_archive(
+    fixture_release: FixtureRelease,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = _dataset(
+        fixture_release, "train", baseline="b0", cache="on", cache_root=tmp_path / "frames"
+    )
+    cold = dataset[0]
+    assert cold.metadata.cache_status == "miss"
+    archive_opens = 0
+    original = dataset_module._read_archive_payload
+
+    def counted(*args: object, **kwargs: object) -> bytes:
+        nonlocal archive_opens
+        archive_opens += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dataset_module, "_read_archive_payload", counted)
+    warm = dataset[0]
+    assert warm.metadata.cache_status == "hit"
+    assert warm.raw_events is None
+    assert warm.metadata.archive_decode_seconds == 0.0
+    assert archive_opens == 0
+    np.testing.assert_array_equal(cold.tensors["event_frame"], warm.tensors["event_frame"])
 
 
 def test_cache_hit_miss_and_stale_renderer_or_contract_entries_are_rebuilt(
