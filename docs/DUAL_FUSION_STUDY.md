@@ -1,5 +1,12 @@
 # Dual hierarchy / latent fusion study
 
+> Status update, 2026-09-26: All three Mini runs completed; recorded results are
+> in [SEACT_STUDY.md](SEACT_STUDY.md#completed-mini-results). The launch notes
+> below describe the original 2026-09-24 handoff. Use the corresponding study
+> artifacts for live status; this document defines the Mini architecture and
+> protocol.
+
+
 Status: **PASS** for implementation and bounded verification (2026-09-24 KST).
 No accuracy claim is available for this study. Subsequent launch update:
 hierarchy-only started on 2026-09-24 at 09:58 KST after the user's instruction

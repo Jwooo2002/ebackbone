@@ -2,20 +2,20 @@
 
 ## Project
 
-`ebackbone_V3` develops a tri-representation event encoder for downstream event classification.
+`ebackbone_V3` studies event classification and backbone transfer using
+complementary representations derived from one raw event stream.
 
-A single raw event sample is rendered into three complementary event representations:
+The implemented repository includes:
 
-- event frame
-- voxel grid
-- time surface
+- original B0 frame-only and B1 tri-representation foundations
+- heterogeneous V1 with controlled baselines
+- full-event point-to-voxel-to-frame hierarchy and TS/polarity/structural ablations
+- hierarchy-only, latent-only and dual weighted fusion
+- SeACT downstream fine-tuning and matched scratch training
 
-The initial scope is limited to two supervised baselines:
-
-- **B0:** frame-only classification
-- **B1:** frame + voxel grid + time surface classification
-
-Both baselines are trained from random initialization with a linear classification head and cross-entropy loss.
+Read `docs/README.md` for the document map and the relevant study protocol
+before modifying its implementation. CLIP is retired; its historical documents
+and `archive/pre-cleanup-20260926` preserve the earlier work.
 
 ## Core terminology
 
@@ -43,30 +43,34 @@ Do not describe event frame, voxel grid, and time surface as independent sensor 
 8. Do not launch long training jobs without an explicit request.
 9. Do not commit, push, or modify external repositories unless explicitly requested.
 10. Do not guess tensor shapes, event counts, temporal windows, channel counts, or dataset statistics. Inspect the actual implementation and data.
+11. Preserve existing runs, checkpoints, manifests, frozen snapshots, queues and live processes. Repository cleanup is not authorization to launch training or resume a paused successor.
+12. Read live histories, reports and queue/launch state before reporting current progress. Separate internal validation from final held-out test and bounded engineering evidence from full-run results.
+13. Keep authorized studies within their recorded protocol. The SeACT supervisor uses the immutable sibling `ebackbone_v3_seact_artifacts/snapshot_20260926/`; do not edit its source or artifact state during repository maintenance.
+14. Mini final-test access remains gated. SeACT's recorded final held-out evaluation is limited to its authorized protocol after checkpoint selection; do not repeat it during cleanup or routine verification.
 
 ## Current scope
 
-Allowed:
+Allowed within the user's requested task:
 
-- inspect repositories and datasets
-- define data contracts
-- implement B0 and B1
-- add unit tests and data probes
-- run small smoke tests
-- document exact commands and outputs
+- inspect repositories and datasets while preserving existing access boundaries
+- maintain the implemented baselines, hierarchy, dual-fusion and SeACT code
+- verify data contracts and run bounded unit/smoke checks
+- document exact commands, provenance and results
+
+An existing trainer or launch command does not authorize a new run. The recorded
+Mini/SeACT study authorization applies to those studies only; inspect their
+protocol and live status before acting. Existing legacy hierarchy/TS queue pauses
+must remain in force. Preserve dual fusion as a learned weighted combination of
+hierarchy and latent features, not a residual correction.
 
 Out of scope until explicitly approved:
 
-- SSMER+ self-supervised losses
-- multi-view InfoNCE
-- auxiliary reconstruction
-- Event2Vec
-- EventBind-style prompts or attention fusion
-- semantic alignment
-- teacher-student distillation
-- detection or segmentation heads
-- architecture scaling studies
-- external pretraining
+- restarting CLIP or adding semantic/text alignment
+- SSMER+ self-supervised losses, multi-view InfoNCE or Event2Vec
+- auxiliary reconstruction, new distillation, prompts or external pretrained models
+- new HARDVS work beyond the retained investigation
+- new datasets, detection/segmentation heads or architecture-scaling studies
+- new full training, transfer runs, queue successors or final-test evaluations
 
 ## Required development sequence
 
@@ -129,7 +133,10 @@ Requirements:
 - all three representations at train and test
 - no SSL objective
 
-The fusion design is not yet fixed. Do not choose a fusion strategy without a dedicated decision task and documented rationale.
+The initial B1 concept is developed in the separate heterogeneous V1 protocol
+(`docs/V1_COMPARISON.md`). Later hierarchy and dual-fusion studies have their own
+recorded architectures. Do not silently substitute one family or fusion rule for
+another; architectural changes require a documented decision and bounded checks.
 
 ## Data contract checks
 
@@ -157,7 +164,7 @@ Primary classification metrics:
 - top-1 accuracy
 - top-5 accuracy only when meaningful for the class count
 
-Efficiency metrics to add once B0/B1 are functional:
+Report efficiency metrics for implemented model comparisons:
 
 - parameter count
 - preprocessing latency
@@ -180,7 +187,7 @@ At minimum, cover:
 - classifier output shape
 - finite forward loss
 - one optimizer step
-- checkpoint save and reload when training infrastructure is introduced
+- checkpoint save/reload, exact resume and backbone-export behavior when relevant
 
 ## Reporting format
 

@@ -18,9 +18,12 @@ from torch.utils.data import DataLoader
 
 from .dual_fusion_data import DualFusionDataset, collate
 from .dual_fusion_models import DualFusionBackbone, export_backbone, load_backbone_export, profile_macs
-from .hierarchy_ddp import (ExactBatchShard, amp, check_gradient_average, cpu_state, flat_grad,
+from .hierarchy_ddp import (ExactBatchShard, amp, check_gradient_average, cpu_state as _cpu_state, flat_grad,
                             gather, resume_epoch, save_epoch, seed_all, synchronize)
 from .v1_training import atomic_json, seed_worker, sha256_file
+
+# Keep the runner's public checkpoint helper available to existing callers.
+cpu_state = _cpu_state
 
 VARIANTS = ('hierarchy_only', 'latent_only', 'dual')
 CONFIG = Path(__file__).resolve().parents[1] / 'configs/dual_fusion.n_imagenet_mini_b64_e50.json'

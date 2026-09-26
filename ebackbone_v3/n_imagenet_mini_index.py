@@ -14,7 +14,7 @@ import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Iterable, Mapping, Sequence
+from typing import BinaryIO, Iterable, Sequence
 
 from ebackbone_v3.errors import EBackboneV3Error
 

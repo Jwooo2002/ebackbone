@@ -14,8 +14,10 @@ from ebackbone_v3.hierarchy_data import prepare_points
 from ebackbone_v3.hierarchy_models import HierarchyV1
 from ebackbone_v3.v1_data import render_v1
 from tests.test_hierarchy import sample as point_sample
-from tests.test_manifest_dataset import fixture_release
+from tests.test_manifest_dataset import fixture_release as _fixture_release
 from tests.test_v1_models_data import fields_source
+
+fixture_release = _fixture_release
 
 
 @pytest.fixture(autouse=True)

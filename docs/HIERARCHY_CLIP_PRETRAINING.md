@@ -1,5 +1,14 @@
 # N-ImageNet Mini hierarchy / CLIP pretraining
 
+> Archived, 2026-09-26: CLIP was dropped. This document preserves the historical
+> protocol; its source, tests and configs have been removed from the active
+> checkout. Recover them from
+> [archive/pre-cleanup-20260926](https://github.com/Jwooo2002/ebackbone/tree/archive/pre-cleanup-20260926)
+> (commit `44d0148`). Commands and authorization statements below describe that
+> historical study and do not authorize restarting it. See the
+> [current documentation index](README.md).
+
+
 This is the explicitly authorized Mini pretraining study, following the bounded
 implementation in `HIERARCHY_CLIP_COMPARISONS.md`. It is **EventBind-inspired
 event–text alignment**, not a full EventBind reproduction. HARDVS is the future

@@ -6,7 +6,9 @@ from ebackbone_v3.representations import SourceIdentity, compute_event_fingerpri
 from ebackbone_v3.errors import DatasetError
 from ebackbone_v3.v1_data import V1Dataset, prepare_raw_cache, render_v1
 from ebackbone_v3.v1_models import MODEL_NAMES, V1Backbone, example_inputs, match_frame_width, profile_macs
-from tests.test_manifest_dataset import fixture_release
+from tests.test_manifest_dataset import fixture_release as _fixture_release
+
+fixture_release = _fixture_release
 
 
 @pytest.fixture(autouse=True)

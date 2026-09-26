@@ -9,9 +9,11 @@ from ebackbone_v3 import hierarchy_training as training
 from ebackbone_v3.errors import DatasetError
 from ebackbone_v3.hierarchy_data import HierarchyDataset, collate, prepare_points
 from ebackbone_v3.hierarchy_models import HierarchyV1, PointToVoxel, profile_macs
-from tests.test_manifest_dataset import fixture_release
+from tests.test_manifest_dataset import fixture_release as _fixture_release
 from tests.test_v1_models_data import fields_source
 from tests.test_v1_training import assert_nested_equal
+
+fixture_release = _fixture_release
 
 
 @pytest.fixture(autouse=True)

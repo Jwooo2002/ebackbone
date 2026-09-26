@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from ebackbone_v3.errors import SplitError
 from ebackbone_v3.n_imagenet_mini_index import (

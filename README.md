@@ -1,219 +1,91 @@
 # ebackbone_V3
 
-Tri-representation event encoding for downstream event classification.
+Event classification and backbone transfer using complementary representations
+of the same raw event stream. The repository contains the production B0 baseline,
+B1 representation contracts and synthetic smoke scaffolding, the heterogeneous
+V1 comparison, point-to-voxel-to-frame hierarchy
+models, dual hierarchy/latent fusion, and the SeACT downstream study.
 
-## Current question
+## Model and experiment map
 
-Given one raw event sample, does jointly using event frame, voxel grid, and time surface improve classification over a frame-only encoder?
+| Family | Implementation | Protocol |
+| --- | --- | --- |
+| B0 production / B1 contracts and smoke checks | `main.py`, `ebackbone_v3/b0_*.py`, `representations.py` | [Baseline usage](docs/BASELINE_USAGE.md), [definitions](docs/BASELINES_B0_B1.md) |
+| Heterogeneous V1 and controlled baselines | `ebackbone_v3/v1*.py` | [V1 comparison](docs/V1_COMPARISON.md) |
+| Hierarchy and TS / polarity / structural ablations | `ebackbone_v3/hierarchy*.py` | [Hierarchy V1](docs/HIERARCHY_V1.md), [family index](docs/README.md#hierarchy-family) |
+| Hierarchy-only / latent-only / dual weighted fusion | `ebackbone_v3/dual_fusion*.py` | [Dual fusion](docs/DUAL_FUSION_STUDY.md) |
+| SeACT fine-tuning and matched scratch runs | `ebackbone_v3/seact*.py`, `tools/prepare_seact.py` | [SeACT study](docs/SEACT_STUDY.md) |
 
-## Initial baselines
+The CLIP experiment is retired. Its historical protocols remain in
+[the documentation archive](docs/README.md#historical-studies); removed source,
+tests and configs are recoverable from Git tag `archive/pre-cleanup-20260926`
+(commit `44d0148`).
 
-### B0 — Frame-only supervised baseline
+## Install and verify
 
-```text
-raw event sample
-→ event frame
-→ encoder
-→ linear classifier
-```
-
-### B1 — Tri-representation supervised baseline
-
-```text
-raw event sample
-├─ event frame
-├─ voxel grid
-└─ time surface
-        ↓
-tri-representation encoder
-        ↓
-linear classifier
-```
-
-Both baselines use random initialization, end-to-end supervised training, and cross-entropy loss.
-
-## Runnable foundation
-
-The heterogeneous V1 and its three controlled baselines are now implemented in
-the separate `python -m ebackbone_v3.v1` entry point. See
-[V1 implementation and comparison protocol](docs/V1_COMPARISON.md) for the exact
-architecture, Mini dataset contract, shared training configuration, compute
-matching, verification evidence, and launch commands. Existing `train-b0`
-commands retain their D012/D014 definitions.
-
-From the repository root:
-
-```bash
-python main.py --help
-python main.py probe --config configs/probe.example.json
-python main.py probe --config configs/probe.n_imagenet_mini.train.part1.json
-python main.py probe --config configs/probe.n_imagenet_mini.validation.first.json
-python main.py build-splits --config configs/splits.n_imagenet_mini.json
-python main.py verify-splits --manifest-dir manifests/n_imagenet_mini/supervised-v1
-python main.py inspect-sample \
-  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
-  --index 0 \
-  --baseline b0 \
-  --cache off \
-  --split train
-python main.py smoke --baseline b0
-python main.py smoke --baseline b1
-python main.py train-b0-debug \
-  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
-  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
-  --output-dir /tmp/ebackbone-v3-b0-tiny-overfit \
-  --subset-size 8 --epochs 120 --batch-size 4 --learning-rate 0.01 --seed 20260715
-```
-
-The two smoke commands are deterministic CPU-only execution checks. They use
-small opaque synthetic tensors to exercise a forward pass, linear classification
-head, cross-entropy loss, backward pass, and one optimizer step. Their shapes and
-toy computation are not a real data contract or a production B0/B1 architecture.
-The output keeps fusion, pooling, encoder sharing, normalization, voxel bins, and
-time-surface semantics marked `TBD`.
-
-The probe uses an explicitly configured Python provider. It validates raw fields,
-event counts, timestamp range, classification bookkeeping, representation tensor
-summaries, provenance, and cross-representation temporal alignment. The generic
-`probe.example.json` remains an intentional unresolved-contract example. The
-resolved N-ImageNet mini configs exercise the verified archive-native provider at
-the local dataset root `/mnt/hdd1/datasets/event/n_imagenet`. See
-`docs/PROBE_PROVIDER_CONTRACT.md` and D009-D011 in `docs/DECISIONS.md`.
-
-The production representation contract is implemented separately in
-`ebackbone_v3/representations.py` and recorded in D012. It fixes the B0 frame
-and aligned B1 frame/voxel/time-surface tensors without implementing a model or
-training loop.
-
-The supervised evaluation split protocol is recorded in D013. It derives a
-deterministic 50-sample-per-class internal validation subset from the official
-training source, keeps the remaining official-training samples as project
-`train`, and reserves every official-validation sample as project `test`.
-Source and project roles remain separate in the immutable manifests: project
-test rows retain `source_split: "validation"` and use `split: "test"`.
-The provenance makes the class-stratified rank independently reproducible as
-`UTF8(selection_domain_utf8) || NUL || ASCII(decimal_seed) || NUL ||
-UTF8(source_stable_sample_id)`.
-
-`build-splits` indexes archive members directly without decoding event tensors.
-It writes canonical `train.jsonl`, `validation.jsonl`, `test.jsonl`,
-`provenance.json`, and `SHA256SUMS` files. Existing artifacts are verified and
-left byte-for-byte untouched; changed inputs, seed, quota, or bytes are a hard
-conflict. The stale bundled 1,000-class path lists are checksummed as
-non-authoritative provenance inputs and never define membership.
-
-`inspect-sample` is the read-only manifest-backed adapter inspection command.
-It uses a row from an immutable manifest; it never resamples a split or extracts
-the full dataset. The default dataset root is
-`/mnt/hdd1/datasets/event/n_imagenet`, matching the checked-in configurations;
-use `--dataset-root <path>` to point at another copy of the same release. The
-command resolves the declared ZIP/TAR/NPZ member path, validates the row identity
-and exact raw-NPZ payload hash, decodes the production `x`, `y`, `t`, `p`
-contract, and renders the D012 production representations. It is CPU-only and
-reports metadata plus tensor shapes, dtypes, and ranges only: it does not create
-or run a model, batch samples, augment data, or start training.
-
-With `--baseline b0`, inspection invokes the dedicated frame renderer and returns
-the frame input only; it does not allocate voxel or time-surface tensors. B0
-therefore requires `--cache off`, because the current cache schema is a full
-three-representation bundle. With
-`--baseline b1`, it returns the frame, voxel grid, and time surface from the
-same verified raw-event fingerprint and temporal interval. `--cache off` reads
-and writes no cache. `--cache on` requires an explicit `--cache-root <path>`;
-cache acceptance is provenance-validated against the production renderer and
-contract versions, project/source split identity, the exact raw payload hash,
-and the raw-event identity, so a stale entry is never silently reused. Every
-inspection requires an explicit project `--split`. Project-final-test rows are
-fail-closed: inspecting `test.jsonl` requires both `--split test` and
-`--allow-final-test`, and denial occurs before reading the test manifest or an
-archive member.
-
-`train-b0-debug` is intentionally limited to the first real-data B0 validation: a
-deterministic 4--16 sample CPU overfit run from explicit project `train`. It materializes only
-the selected production `[2,480,640]` float32 event frames in memory, uses the
-explicit 68,148-parameter `compact_debug` engineering model, and writes a
-checkpoint with strict reload/logit-equivalence verification. It does not
-provide a full-dataset mode, access validation/test rows, augment inputs, or
-read/write the representation cache. PASS requires the requested fixed-subset
-accuracy and a final evaluation loss no greater than 25% of the initial loss.
-This diagnostic is not the scientific B0 architecture and its results are not
-valid B0 accuracy results.
-
-`diagnose-b0-train` is the separate bounded integration check for the scientific
-ResNet-18 path:
-
-```bash
-python main.py diagnose-b0-train \
-  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
-  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
-  --output-dir /path/to/new-diagnostic \
-  --subset-size 8 --batch-size 4 --max-steps 100 \
-  --evaluation-interval 10 --learning-rate 0.05 \
-  --momentum 0.9 --weight-decay 0 --seed 20260715 --device cpu
-```
-
-It deterministically selects only project-train samples, decodes their real NPZ
-payloads, renders and collates event frames, exercises the production ResNet-18,
-and verifies backward/update plus exact BatchNorm and evaluation-logit checkpoint
-restoration. CPU is the default. `cuda:1` is the only permitted GPU spelling and
-must be checked idle before use; `cuda:0` is rejected. The command accepts 8-16
-samples, requires batch size at least 4, caps execution at 200 optimizer steps,
-and never exposes a validation/final-test split argument. Its metrics are
-engineering evidence only.
-
-Production B0 training is a separate command and architecture:
-
-```bash
-python main.py train-b0 \
-  --manifest-dir manifests/n_imagenet_mini/supervised-v1 \
-  --dataset-root /mnt/hdd1/datasets/event/n_imagenet \
-  --output-dir /path/outside-or-inside-worktree/to/new-run \
-  --epochs 100 --batch-size 1 --learning-rate 0.05 \
-  --momentum 0.9 --weight-decay 0.0001 \
-  --seed 20260715 --num-workers 0 --prefetch-factor 2 --device cpu
-```
-
-The D014 production model is a randomly initialized 11,224,676-parameter
-ResNet-18 adapted to the fixed two-channel native-resolution event frame. It
-uses `Conv2d(2,64,7,stride=2,padding=3,bias=False)`, standard ResNet-18 residual
-stages and BatchNorm, max-pooling, adaptive global average pooling to a
-512-dimensional embedding, exactly one `Linear(512,100)` classifier, and
-cross-entropy. The local implementation has no external-weight or network-loading
-path. The command
-uses only project train samples for optimization and the complete project
-validation manifest for best-checkpoint selection. Project test manifests are
-not accepted. It writes atomic best/last checkpoints, append-only JSONL batch
-and epoch logs, a JSON report, top-1/top-5 metrics, throughput, peak GPU memory,
-and strict reload evidence. CPU, batch size 1, and zero loader workers are the
-bounded defaults; CUDA requires explicit `--device cuda`. Resume requires `checkpoint_last.pt` and an exact
-match of model, optimizer, scheduler, seed, manifest hashes, renderer provenance,
-and loader configuration.
-
-## Development setup
-
-Python 3.10 or newer, NumPy 1.24 or newer, and PyTorch 2.0 or newer are required.
-For an editable development installation:
+Python 3.10+, NumPy 1.24+ and PyTorch 2.0+ are declared in
+[pyproject.toml](pyproject.toml). From the repository root:
 
 ```bash
 python -m pip install -e '.[dev]'
+python main.py --help
+python main.py smoke --baseline b0
+python main.py smoke --baseline b1
 python -m pytest -q
 ```
 
-## Not included yet
+Use this source checkout with an editable installation: study configs, manifests
+and preparation tools live outside the Python package and are not included in
+the standalone wheel. Production tri-representation models are implemented in V1.
 
-- SSMER+ self-supervised learning
-- Event2Vec
-- EventBind-inspired fusion
-- semantic alignment
-- auxiliary reconstruction
-- detection or segmentation
-- self-supervised pretraining and transfer evaluation for V1
+The smoke commands use small synthetic CPU tensors and perform one optimizer
+step. They verify execution, not scientific accuracy or a real-data contract.
+The default test suite uses synthetic fixtures and bounded CPU checks; local
+integration tests that depend on the original machine are skipped. To opt in
+when those local resources are available, run
+`python -m pytest -q --run-local-integration`. Optional W&B
+tracking is available through `python -m pip install -e '.[tracking]'`;
+[tracking instructions](docs/WANDB.md) describe its use. Decoding SeACT AEDAT4
+files additionally requires the `dv` decoder used by `tools/prepare_seact.py`;
+it is separate from the core dependency set.
 
-## Document order
+Inspect available study commands without launching training:
 
-1. `AGENTS.md`
-2. `docs/PROJECT_CONTEXT.md`
-3. `docs/DATA_AND_EVAL_PROTOCOL.md`
-4. `docs/BASELINES_B0_B1.md`
-5. `docs/PROBE_PROVIDER_CONTRACT.md`
-6. `docs/DECISIONS.md`
+```bash
+python -m ebackbone_v3.v1 --help
+python -m ebackbone_v3.hierarchy --help
+python -m ebackbone_v3.hierarchy_ddp --help
+python -m ebackbone_v3.dual_fusion_train --help
+python -m ebackbone_v3.seact_train --help
+```
+
+## Data, runs and reproducibility
+
+- `ebackbone_v3/`: models, event rendering, data adapters, trainers and verification.
+- `configs/`: recorded study configurations, including machine-specific dataset,
+  manifest and cache paths. Inspect and adapt paths in a new config for another
+  machine; preserve any existing run's hashed configuration.
+- `manifests/`: immutable dataset membership and provenance. Mini internal
+  validation is distinct from its final held-out test split.
+- `tests/`: contract, model, training, resume and export checks.
+- `docs/`: architecture and protocol records; begin with the
+  [documentation index](docs/README.md).
+
+Raw datasets, caches, checkpoints, generated reports and local tracking output
+are not distributed in this source repository. On the original workspace,
+study artifacts live in sibling `ebackbone_v3_*_artifacts/` directories. Their
+histories, reports and queue status are the authority for live progress; dated
+protocol documents do not establish current completion.
+
+The SeACT supervisor uses the frozen
+`../ebackbone_v3_seact_artifacts/snapshot_20260926/` source and records live state
+in that artifact directory's `study_status.json`. Preserve running processes,
+frozen snapshots, checkpoints and the paused legacy hierarchy/TS queue.
+Historical checkpoint resumes require their matching archived or frozen source;
+cleanup changes source hashes checked by strict resume validation. See the
+[cleanup audit](docs/REPOSITORY_CLEANUP.md) for recovery and verification details.
+
+Repository maintenance and verification do not authorize additional training,
+queue successors, data-split changes or final-test evaluation. See
+[AGENTS.md](AGENTS.md), [project context](docs/PROJECT_CONTEXT.md), and the
+[data/evaluation protocol](docs/DATA_AND_EVAL_PROTOCOL.md) before changes.

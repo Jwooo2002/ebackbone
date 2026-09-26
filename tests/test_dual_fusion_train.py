@@ -1,4 +1,3 @@
-from copy import deepcopy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,7 +42,8 @@ def test_locked_config_and_readonly_inspection():
     config = d.load_config(d.CONFIG)
     assert config['training']['global_batch_size'] == 64
     assert config['training']['epochs'] == 50
-    assert Path(config['manifest_dir']).is_dir()
+    bundled_manifests = Path(__file__).resolve().parents[1] / 'manifests/n_imagenet_mini/supervised-v1'
+    assert Path(config['manifest_dir']) == bundled_manifests
     identity = d.identity_for(config, 'dual')
     assert set(identity['source_sha256']) == set(d.SOURCE_FILES)
     assert identity['final_test_accessed'] is False

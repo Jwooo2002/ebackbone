@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from .dual_fusion_data import INPUT_CONTRACT_SHA256, MODES, VIEW_KEYS, input_keys
+from .dual_fusion_data import INPUT_CONTRACT_SHA256, VIEW_KEYS, input_keys
 from .hierarchy_models import HierarchyV1, INPUT_KEYS as POINT_KEYS, example_inputs as point_example
 from .v1_models import Branch
 

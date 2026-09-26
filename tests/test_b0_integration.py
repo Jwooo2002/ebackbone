@@ -81,6 +81,7 @@ def test_integration_dataset_entrypoint_is_hard_coded_train_and_frame_only(
     assert "allow_final_test" not in inspect.signature(run_b0_train_integration).parameters
 
 
+@pytest.mark.local_integration
 @pytest.mark.skipif(
     not REAL_DATASET_ROOT.is_dir() or not (REAL_MANIFEST_DIR / "train.jsonl").is_file(),
     reason="local real N-ImageNet mini release is unavailable",

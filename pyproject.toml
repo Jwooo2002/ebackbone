@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ebackbone-v3"
 version = "0.1.0"
-description = "Tri-representation event classification project foundation"
+description = "Full-event hierarchy and dual-fusion backbones for event classification"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 tracking = ["wandb==0.30.0"]
 dev = [
     "pytest>=8",
+    "pyflakes>=3",
 ]
 
 [project.scripts]
@@ -27,3 +28,6 @@ include = ["ebackbone_v3*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "local_integration: requires --run-local-integration and local datasets or experiment artifacts",
+]

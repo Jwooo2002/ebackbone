@@ -1,5 +1,14 @@
 # Hierarchy / CLIP bounded comparisons
 
+> Archived, 2026-09-26: CLIP was dropped. This document preserves the historical
+> protocol; its source, tests and configs have been removed from the active
+> checkout. Recover them from
+> [archive/pre-cleanup-20260926](https://github.com/Jwooo2002/ebackbone/tree/archive/pre-cleanup-20260926)
+> (commit `44d0148`). Commands and authorization statements below describe that
+> historical study and do not authorize restarting it. See the
+> [current documentation index](README.md).
+
+
 Implements the September 20 CLIP proposal in task `0- 총괄`
 (`01a093eb-cd6d-7843-8233-563c2dcded12`). The proposal is preserved in
 `/mnt/ssd1/PycharmProjects/ebackbone_v3_hierarchy_clip_artifacts/proposal_source.md`.

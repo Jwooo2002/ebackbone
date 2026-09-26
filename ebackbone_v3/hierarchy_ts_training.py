@@ -137,7 +137,7 @@ def verify_checkpoint(path, model, inputs, config):
             "logits_bit_exact": True, "sha256": sha256_file(path)}
 
 
-def run_model(name, config, *, manifest_dir, dataset_root, output_dir, raw_cache=None,
+def run_model(name, config: TrainConfig, *, manifest_dir, dataset_root, output_dir, raw_cache=None,
               diagnostic_samples=None, resume=False, stop_after_epoch=None):
     config.validate()
     if name not in MODEL_NAMES:
