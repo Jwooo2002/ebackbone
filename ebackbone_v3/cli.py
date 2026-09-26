@@ -152,6 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional deterministic per-class internal-validation pilot subset.",
     )
     train_b0_parser.add_argument("--num-workers", type=int, default=0)
+    train_b0_parser.add_argument(
+        "--cache-root",
+        help="Optional explicit root for validated B0 frame-only cache entries.",
+    )
     train_b0_parser.add_argument("--prefetch-factor", type=int, default=2)
     train_b0_parser.add_argument(
         "--no-amp",
@@ -309,6 +313,7 @@ def _handle_train_b0(args: argparse.Namespace) -> dict[str, Any]:
         device_name=args.device,
         stop_after_epoch=args.stop_after_epoch,
         resume=args.resume,
+        cache_root=args.cache_root,
     )
 
 

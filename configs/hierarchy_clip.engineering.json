@@ -1,0 +1,16 @@
+{
+  "purpose": "bounded engineering only; downstream dataset not selected",
+  "downstream_dataset": null,
+  "full_training_authorized": false,
+  "manifest_dir": "/mnt/ssd1/PycharmProjects/ebackbone_V3/manifests/n_imagenet_mini/supervised-v1",
+  "dataset_root": "/mnt/hdd1/datasets/event/n_imagenet",
+  "raw_cache": "/mnt/ssd1/PycharmProjects/ebackbone_v3_v1_artifacts/raw_cache",
+  "hierarchy_checkpoint": "/mnt/ssd1/PycharmProjects/ebackbone_v3_hierarchy_ddp_b64_e50_artifacts/runs/hierarchy/backbone_best.pt",
+  "clip_checkpoint": "/mnt/ssd1/PycharmProjects/model_zoo/pretrained_CLIP/ViT-B-16.pt",
+  "clip_source_dir": "/mnt/ssd1/PycharmProjects/tranfer_candidate/ExACT/model/clip",
+  "class_names_path": "/mnt/ssd1/PycharmProjects/ebackbone_v3_hierarchy_clip_artifacts/mini_class_names.json",
+  "prompt_template": "a photo of a {class_name}.",
+  "num_windows": 4,
+  "seed": 20260908,
+  "wait_for_study": "/mnt/ssd1/PycharmProjects/ebackbone_v3_hierarchy_ddp_b64_e50_artifacts"
+}

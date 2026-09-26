@@ -34,6 +34,13 @@ Both baselines use random initialization, end-to-end supervised training, and cr
 
 ## Runnable foundation
 
+The heterogeneous V1 and its three controlled baselines are now implemented in
+the separate `python -m ebackbone_v3.v1` entry point. See
+[V1 implementation and comparison protocol](docs/V1_COMPARISON.md) for the exact
+architecture, Mini dataset contract, shared training configuration, compute
+matching, verification evidence, and launch commands. Existing `train-b0`
+commands retain their D012/D014 definitions.
+
 From the repository root:
 
 ```bash
@@ -200,7 +207,7 @@ python -m pytest -q
 - semantic alignment
 - auxiliary reconstruction
 - detection or segmentation
-- B1 models, fusion, or training loops
+- self-supervised pretraining and transfer evaluation for V1
 
 ## Document order
 

@@ -1,0 +1,23 @@
+{
+  "protocol": "dual-hierarchy-latent-mini-b64-e50-v1",
+  "manifest_dir": "../manifests/n_imagenet_mini/supervised-v1",
+  "dataset_root": "/mnt/hdd1/datasets/event/n_imagenet",
+  "raw_cache": "/mnt/ssd1/PycharmProjects/ebackbone_v3_v1_artifacts/raw_cache",
+  "train_manifest_sha256": "0ac90325e943cc369c4071f4a7abe579ca6c07ec450c0ab898b8c82f9f0403c7",
+  "validation_manifest_sha256": "7732065a0455628581f3b875ba33da9eedaded4b834d2432e719004151809b97",
+  "model": {"height": 480, "width": 640, "num_classes": 100, "dimension": 256, "latent_width": 8},
+  "training": {
+    "world_size": 2,
+    "global_batch_size": 64,
+    "batch_size": 32,
+    "accumulation_steps": 1,
+    "epochs": 50,
+    "learning_rate": 0.05,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "seed": 20260908,
+    "num_workers": 4,
+    "cpu_threads": 4,
+    "precision": "bfloat16"
+  }
+}

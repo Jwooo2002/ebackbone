@@ -9,3 +9,27 @@ venv/
 build/
 dist/
 
+# Local editors and credentials
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated experiment output stays local; manifests/configs are versioned.
+reports/
+runs/
+outputs/
+artifacts/
+wandb/
+data/
+datasets/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.log
+.coverage
+htmlcov/

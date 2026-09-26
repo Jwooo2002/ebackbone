@@ -7,7 +7,9 @@ import json
 import math
 import os
 import random
+import tarfile
 import time
+import zipfile
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -34,6 +36,8 @@ from ebackbone_v3.n_imagenet_mini_dataset import (
     ManifestSample,
     open_dataset,
 )
+import ebackbone_v3.n_imagenet_mini_dataset as _dataset_adapter
+from ebackbone_v3.representations import write_frame_cache
 from ebackbone_v3.representations import (
     CACHE_SCHEMA_VERSION,
     CONTRACT_NAME,
@@ -186,6 +190,7 @@ def run_production_b0(
     validation_subset_per_class: int | None = None,
     stop_after_epoch: int | None = None,
     resume: str | Path | None = None,
+    cache_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Train random-initialized production B0 and select on full validation only."""
 
@@ -203,25 +208,32 @@ def run_production_b0(
         validation_subset_per_class=validation_subset_per_class,
     )
     output = Path(output_dir).expanduser().resolve()
-    resume_path = Path(resume).expanduser().resolve() if resume is not None else None
+    requested_resume_path = Path(resume).expanduser().resolve() if resume is not None else None
+    automatic_resume = requested_resume_path is None and (output / CHECKPOINT_LAST_FILENAME).is_file()
+    resume_path = requested_resume_path or (
+        output / CHECKPOINT_LAST_FILENAME if automatic_resume else None
+    )
     device = _resolve_device(device_name)
     _prepare_output_directory(output, resume_path=resume_path)
     _seed_everything(seed, include_cuda=device.type == "cuda")
     use_amp = bool(amp and device.type == "cuda")
+    cache_enabled = cache_root is not None
 
     # Roles are explicit at the canonical boundary; no filename selects a split.
     train_dataset = open_dataset(
         manifest_dir=manifest_dir,
         dataset_root=dataset_root,
         baseline="b0",
-        cache="off",
+        cache="on" if cache_enabled else "off",
+        cache_root=cache_root,
         split="train",
     )
     validation_dataset = open_dataset(
         manifest_dir=manifest_dir,
         dataset_root=dataset_root,
         baseline="b0",
-        cache="off",
+        cache="on" if cache_enabled else "off",
+        cache_root=cache_root,
         split="validation",
     )
     if train_dataset.renderer_fingerprint != validation_dataset.renderer_fingerprint:
@@ -255,6 +267,7 @@ def run_production_b0(
         device=device,
         train_subset_audit=train_subset_audit,
         validation_subset_audit=validation_subset_audit,
+        cache_root=cache_root,
     )
 
     model = build_b0_model(class_count=B0_CLASS_COUNT).to(device)
@@ -264,8 +277,13 @@ def run_production_b0(
         momentum=momentum,
         weight_decay=weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=0.0
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        [
+            torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=5),
+            torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs - 5, eta_min=0.0),
+        ],
+        milestones=[5],
     )
     history: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
@@ -286,6 +304,7 @@ def run_production_b0(
         _restore_rng_state(checkpoint["rng_state"])
         resume_report = {
             "checkpoint_path": str(resume_path),
+            "automatic_checkpoint_discovery": automatic_resume,
             "loaded_epoch": loaded_epoch,
             "continued_from_epoch": start_epoch,
             "strict_load_missing_keys": list(incompatible.missing_keys),
@@ -304,6 +323,7 @@ def run_production_b0(
 
     log_path = output / LOG_FILENAME
     log_mode = "a" if resume_path is not None else "x"
+    training_started = time.perf_counter()
     with log_path.open(log_mode, encoding="utf-8", buffering=1) as log_handle:
         _write_log(
             log_handle,
@@ -383,6 +403,11 @@ def run_production_b0(
                 _atomic_torch_save(output / CHECKPOINT_BEST_FILENAME, checkpoint_payload)
             _write_log(log_handle, {"event": "epoch", **epoch_record, "is_best": is_best})
 
+    total_runtime_seconds = time.perf_counter() - training_started
+    epoch_runtime_seconds = [
+        float(record["train"]["elapsed_seconds"]) + float(record["validation"]["elapsed_seconds"])
+        for record in history
+    ]
     strict_reload = {
         "last": verify_production_checkpoint(output / CHECKPOINT_LAST_FILENAME),
         "best": verify_production_checkpoint(output / CHECKPOINT_BEST_FILENAME),
@@ -421,6 +446,16 @@ def run_production_b0(
             "best": str((output / CHECKPOINT_BEST_FILENAME).resolve()),
         },
         "jsonl_log": str(log_path.resolve()),
+        "runtime": {
+            "total_runtime_seconds": total_runtime_seconds,
+            "epoch_runtime_total_seconds": sum(epoch_runtime_seconds),
+            "mean_epoch_runtime_seconds": (
+                sum(epoch_runtime_seconds) / len(epoch_runtime_seconds)
+                if epoch_runtime_seconds
+                else None
+            ),
+            "epochs_recorded": len(epoch_runtime_seconds),
+        },
         "peak_gpu_memory_bytes": (
             int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else None
         ),
@@ -716,6 +751,7 @@ def _run_config(
     device: torch.device,
     train_subset_audit: dict[str, Any],
     validation_subset_audit: dict[str, Any],
+    cache_root: str | Path | None,
 ) -> dict[str, Any]:
     return {
         "baseline": "b0",
@@ -723,7 +759,7 @@ def _run_config(
             "representation": "production event frame only",
             "shape": list(B0_INPUT_SHAPE),
             "dtype": "float32",
-            "cache": "off; no representation cache read or write",
+            "cache": ("frame-only cache: " + str(Path(cache_root).expanduser().resolve())) if cache_root is not None else "off; no representation cache read or write",
             "augmentation": "none",
         },
         "model": {
@@ -741,8 +777,9 @@ def _run_config(
             "weight_decay": weight_decay,
         },
         "scheduler": {
-            "name": "CosineAnnealingLR",
-            "T_max": epochs,
+            "name": "LinearLR(1 epoch) then CosineAnnealingLR",
+            "warmup_epochs": 5,
+            "cosine_T_max": epochs - 5,
             "eta_min": 0.0,
             "step_unit": "epoch",
         },
@@ -940,6 +977,78 @@ def _deterministic_balanced_subset(
         "selected_sample_id_sha256": digest.hexdigest(),
         "labels_used_only_for": "deterministic dataset bookkeeping",
     }
+
+
+def prebuild_b0_frame_cache(
+    *, manifest_dir: str | Path, dataset_root: str | Path,
+    cache_root: str | Path, seed: int, train_per_class: int, validation_per_class: int | None,
+) -> dict[str, Any]:
+    """Materialize only selected B0 frames before a cache-only scientific pilot."""
+    report: dict[str, Any] = {"project_splits_opened": [], "representation": "event_frame only"}
+    for split, per_class in (("train", train_per_class), ("validation", validation_per_class)):
+        dataset = open_dataset(
+            manifest_dir=manifest_dir, dataset_root=dataset_root, split=split,
+            baseline="b0", cache="on", cache_root=cache_root,
+        )
+        subset, audit = _deterministic_balanced_subset(
+            dataset, per_class=per_class, seed=seed, split=split
+        )
+        selected_indices = list(range(len(dataset))) if per_class is None else subset.indices  # type: ignore[attr-defined]
+        statuses = _populate_selected_frame_cache(dataset, selected_indices)
+        report[split] = {"subset": audit, "cache_status_counts": statuses}
+        report["project_splits_opened"].append(split)
+    report["project_test_manifest_opened"] = False
+    report["b1_inputs_requested"] = False
+    return report
+
+
+def _populate_selected_frame_cache(dataset: Any, indices: Sequence[int]) -> dict[str, int]:
+    """Populate selected B0 frames by traversing each nested tar only once."""
+    rows = [dataset._rows[index] for index in indices]
+    pending: dict[tuple[str, str | None], list[Any]] = {}
+    statuses: dict[str, int] = {}
+    for row in rows:
+        if dataset._try_frame_cache(row) is not None:
+            statuses["hit"] = statuses.get("hit", 0) + 1
+            continue
+        tar_member = row.source_members[0] if row.source_split == "train" else None
+        pending.setdefault((row.source_archive, tar_member), []).append(row)
+    for (source_archive, tar_member), group in pending.items():
+        archive_path = _dataset_adapter._resolve_archive_path(dataset.dataset_root, source_archive)
+        if tar_member is None:
+            with zipfile.ZipFile(archive_path) as zip_handle:
+                for row in group:
+                    payload = zip_handle.read(row.source_members[0])
+                    _cache_one_frame(dataset, row, payload, statuses)
+            continue
+        wanted = {row.source_members[1]: row for row in group}
+        with zipfile.ZipFile(archive_path) as zip_handle:
+            with zip_handle.open(tar_member) as compressed_tar:
+                with tarfile.open(fileobj=compressed_tar, mode="r|gz") as tar_handle:
+                    for member in tar_handle:
+                        row = wanted.get(member.name)
+                        if row is None or not member.isfile():
+                            continue
+                        extracted = tar_handle.extractfile(member)
+                        if extracted is None:
+                            raise TrainingError(f"could not extract selected source member {row.source_locator}")
+                        _cache_one_frame(dataset, row, extracted.read(), statuses)
+                        del wanted[member.name]
+        if wanted:
+            raise TrainingError(f"selected source members missing from {source_archive}: {len(wanted)}")
+    if sum(statuses.values()) != len(rows):
+        raise TrainingError("frame cache prebuild did not account for every selected sample")
+    return statuses
+
+
+def _cache_one_frame(dataset: Any, row: Any, payload: bytes, statuses: dict[str, int]) -> None:
+    _dataset_adapter._validate_raw_payload(payload, row)
+    fields = _dataset_adapter._decode_event_fields(payload, sample_id=row.sample_id)
+    source = _dataset_adapter._source_identity(row, fields)
+    frame = _dataset_adapter._render_frame(fields, source, dataset.renderer_config)
+    target = _dataset_adapter.cache_path(dataset.cache_root, dataset._catalog_frame_cache_key(row))
+    write_frame_cache(target, frame, cache_key=dataset._catalog_frame_cache_key(row))
+    statuses["miss"] = statuses.get("miss", 0) + 1
 
 
 def _seed_everything(seed: int, *, include_cuda: bool) -> None:
