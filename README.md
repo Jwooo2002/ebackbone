@@ -6,6 +6,9 @@ B1 representation contracts and synthetic smoke scaffolding, the heterogeneous
 V1 comparison, point-to-voxel-to-frame hierarchy
 models, dual hierarchy/latent fusion, and the SeACT downstream study.
 
+For the relationship between the local V1/V2/V3 checkouts and experiment folders,
+see the [ebackbone version and folder guide (한국어)](docs/EBACKBONE_FAMILY.md).
+
 ## Model and experiment map
 
 | Family | Implementation | Protocol |

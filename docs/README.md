@@ -2,6 +2,8 @@
 
 Start with the [repository overview](../README.md),
 [project context](PROJECT_CONTEXT.md), and [development rules](../AGENTS.md).
+The [ebackbone family guide (한국어)](EBACKBONE_FAMILY.md) explains the V1/V2/V3
+checkouts, the ASL worktree, package names and experiment artifact folders.
 Documents record the protocol and evidence at their stated dates. Use the
 corresponding local run artifacts for live status, and keep internal validation,
 held-out evaluation and engineering probes separate. The
